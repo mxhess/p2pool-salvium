@@ -1,6 +1,6 @@
-# Monero P2Pool
+# Salvium P2Pool
 
-Decentralized pool for Monero mining.
+A fork of the Decentralized pool for monero mining converted for Salvium.
 
 Pool status and monitoring pages can be found at https://p2pool.io/, https://p2pool.io/mini/ and https://p2pool.observer/, https://mini.p2pool.observer/
 
@@ -24,7 +24,7 @@ These are 3rd-party pages. If they are down, it doesn't mean there is a problem 
 - [Features](#features)
 - [How payouts work in P2Pool](#how-payouts-work-in-p2pool)
 - [Default P2Pool parameters](#default-p2pool-parameters)
-- [Monero version support](#monero-version-support)
+- [Salvium version support](#salvium-version-support)
 - [How to mine on P2Pool](#how-to-mine-on-p2pool)
   - [General Considerations](#general-considerations)
   - [GUI for P2Pool](#gui-for-p2pool)
@@ -37,17 +37,17 @@ These are 3rd-party pages. If they are down, it doesn't mean there is a problem 
 
 ## Pool mining vs Solo mining vs P2Pool mining
 
-Here's the comparison table of the different ways of mining. While pool mining is the easiest to setup, it centralizes Monero network and pool admin gets full power over your hashrate and your unpaid funds. Solo mining is 100% independent and the best for the network. P2Pool mining has all the advantages of solo mining, but also makes regular payouts possible.
+Here's the comparison table of the different ways of mining. While pool mining is the easiest to setup, it centralizes Salvium network and pool admin gets full power over your hashrate and your unpaid funds. Solo mining is 100% independent and the best for the network. P2Pool mining has all the advantages of solo mining, but also makes regular payouts possible.
 
 |Pool type|Payouts|Fee|Min. payout|Centralized?|Stability|Control|Setup
 |-|-|-|-|-|-|-|-|
 |Centralized pool|Regular|0-3%|0.001-0.01 XMR|Yes|Less stable due to pool server outages|Pool admin controls your mined funds, what you mine and can execute network attacks|Only miner software is required
-|Solo|Rare|0%|0.6 XMR or more|No|As stable as your Monero node|100% under your control|Monero node + optional miner
-|**P2Pool**|Regular|0%|~0.00027 XMR|No|Very stable: node failover and multiple Monero nodes are supported|100% under your control|Monero node(s) + P2Pool node(s) + optional miner(s)
+|Solo|Rare|0%|0.6 XMR or more|No|As stable as your Salvium node|100% under your control|Salvium node + optional miner
+|**P2Pool**|Regular|0%|~0.00027 XMR|No|Very stable: node failover and multiple Salvium nodes are supported|100% under your control|Salvium node(s) + P2Pool node(s) + optional miner(s)
 
 ## Features
 
-* Decentralized: no central server that can be shutdown/blocked. P2Pool uses a separate blockchain to merge mine with Monero. Pool admin can't go rogue or be pressured to do an attack on the network because there is no pool admin!
+* Decentralized: no central server that can be shutdown/blocked. P2Pool uses a separate blockchain to merge mine with Salvium. Pool admin can't go rogue or be pressured to do an attack on the network because there is no pool admin!
 * Permissionless: there is no one to decide who can mine on the pool and who can't.
 * Trustless: there is no pool wallet, funds are never in custody. All pool blocks pay out to miners directly.
 * PPLNS payout scheme
@@ -57,49 +57,49 @@ Here's the comparison table of the different ways of mining. While pool mining i
 * Fast block times, down to 1 second
 * Uncle blocks are supported to avoid orphans - all your shares will be accounted for!
 * Configurable PPLNS window size and block time
-* Advanced mempool picking algorithm, it creates blocks with better reward than what monerod solo mining does
+* Advanced mempool picking algorithm, it creates blocks with better reward than what salviumd solo mining does
 * Password protected private pools
-* Highly reliable configurations are supported (multiple P2Pool nodes mining to the same wallet, each P2Pool node can use multiple Monero nodes and switch on the fly if an issue is detected)
+* Highly reliable configurations are supported (multiple P2Pool nodes mining to the same wallet, each P2Pool node can use multiple Salvium nodes and switch on the fly if an issue is detected)
 * Mining through [TOR](docs/TOR.MD) is fully supported
 
 ## How payouts work in P2Pool
 
-First you need to find a pool share. This share will stay in [PPLNS](https://en.wikipedia.org/wiki/Mining_pool#Pay-per-last-N-shares) window for up to 2160 pool blocks (6 hours, auto adjustable to balance payout sizes and frequency). The moment P2Pool finds a Monero block and you have at least 1 pool share in PPLNS window, you'll get a payout! Monero block reward is split between all miner wallets in PPLNS window. Each miner gets a part of block reward proportional to the total difficulty of his/her shares in PPLNS window.
+First you need to find a pool share. This share will stay in [PPLNS](https://en.wikipedia.org/wiki/Mining_pool#Pay-per-last-N-shares) window for up to 2160 pool blocks (6 hours, auto adjustable to balance payout sizes and frequency). The moment P2Pool finds a Salvium block and you have at least 1 pool share in PPLNS window, you'll get a payout! Salvium block reward is split between all miner wallets in PPLNS window. Each miner gets a part of block reward proportional to the total difficulty of his/her shares in PPLNS window.
 
-**NOTE** If P2Pool doesn't have enough hashrate to find Monero blocks faster than every 6 hours on average (~15 MH/s), **not all your pool shares will result in a payout**. Even if pool hashrate is higher, bad luck can sometimes result in a share going through PPLNS window without a payout. But in the long run it will be compensated by other shares receiving multiple payouts - your payouts will average out to what you'd get with regular pool mining.
+**NOTE** If P2Pool doesn't have enough hashrate to find Salvium blocks faster than every 6 hours on average (~15 MH/s), **not all your pool shares will result in a payout**. Even if pool hashrate is higher, bad luck can sometimes result in a share going through PPLNS window without a payout. But in the long run it will be compensated by other shares receiving multiple payouts - your payouts will average out to what you'd get with regular pool mining.
 
 ## Default P2Pool parameters
 
 * Block time: 10 seconds
 * PPLNS window: up to 2160 blocks (6 hours, auto adjustable to balance payout sizes and frequency)
-* Minimum payout = Monero block reward/2160, ~0.00027 XMR
+* Minimum payout = Salvium block reward/2160, ~0.00027 SAL
 
-## Monero version support
+## Salvium version support
 
-- The latest Monero network upgrade happened on August 13th, 2022 (block 2,688,888).
-- The latest P2Pool network upgrade happened on October 12th, 2024 at 20:00 UTC.
+- The latest Salvium network upgrade happened on October 13th, 2025 (block 334,750).
+- The latest P2Pool network upgrade happened on November 11th, 2025.
 
-In order to continue mining on P2Pool, you must update both Monero and P2Pool software to the latest available versions as soon as they are released.
+In order to continue mining on P2Pool, you must update both Salvium and P2Pool software to the latest available versions as soon as they are released.
 
-|Monero protocol version|Required Monero software version|Required P2Pool version
+|Salvium protocol version|Required Salvium software version|Required P2Pool version
 |-|-|-|
-|v15, v16 (active after August 13th, 2022)|v0.18.0.0 or newer, v0.18.4.2 is recommended|v4.0 or newer
+|v11|v1.0.6 or newer is reequired|v4.2 or newer
 
 ## How to mine on P2Pool
 
 ### General Considerations
 
-- In order to mine on P2Pool, a synced Monero node using monerod v0.18.0.0 or newer is required. If you don't currently have one, you can download the [official Monero binaries](https://www.getmonero.org/downloads/), start `monerod` on your PC and wait until it's fully synced. Advanced Monero node setup instructions are [here](https://sethforprivacy.com/guides/run-a-monero-node-advanced/).
+- In order to mine on P2Pool, a synced Salvium node using salviumd v1.0.6 or newer is required. If you don't currently have one, you can download the [official Salvium binaries](https://salvium.io/download.html), start `salviumd` on your PC and wait until it's fully synced. Advanced Salvium node setup instructions are [here](https://sethforprivacy.com/guides/run-a-monero-node-advanced/).
 - It is highly recommended that you create a separate restricted user account (in your OS) for mining. While P2Pool has been battle-tested for a long time now, any software may have unknown bugs/vulnerabilities. 
-- You can mine to a primary wallet address (the one starting with `4`) for mining. If you want to mine to a subaddress, you will need to provide both the main address (starting with 4) and the subaddress (starting with 8) using `--wallet` and `--subaddress` command line parameters.
-- You can add the `--mini` parameter to your P2Pool command to connect to the **p2pool-mini** sidechain. Note that it will also change the default p2p port from 37889 to 37888.
-- Check that ports 18080 (Monero p2p port) and 37889/37888 (P2Pool/P2Pool mini p2p port) are open in your firewall to ensure better connectivity. If you're mining from a computer behind NAT (like a router) you could consider forwarding the ports to your local machine.
+- You can mine to a primary wallet address (the one starting with `SC1`) for mining. If you want to mine to a subaddress, you will need to provide both the main address (starting with SC1) and the subaddress (starting with SC1s) using `--wallet` and `--subaddress` command line parameters.
+- You can add the `--mini` parameter to your P2Pool command to connect to the **p2pool-mini** sidechain. Note that it will also change the default p2p port from 38889 to 38888.
+- Check that ports 19080 (Salvium p2p port) and 38889/38888 (P2Pool/P2Pool mini p2p port) are open in your firewall to ensure better connectivity. If you're mining from a computer behind NAT (like a router) you could consider forwarding the ports to your local machine.
 - You can connect multiple miners to the same P2Pool node. The more the better!
 - The steps below assume that you run everything on the same machine. If it's not the case, change `127.0.0.1` to appropriate IP addresses for your setup. 
-- It is highly recommended to create a new mainnet wallet for P2Pool mining because **wallet addresses are public on P2Pool**.
+- It is highly recommended to create a new mainnet wallet for P2Pool mining because **wallet addresses are PUBLIC on P2Pool**.
 
 **Wallet software compatible with P2Pool payouts**
-- [Official Monero CLI and GUI v0.18.0.0 and newer](https://www.getmonero.org/downloads/)
+- [Official Salvium CLI and GUI v1.0.6 and newer](https://salvium.io/download.html)
 - [Monerujo v3.0.2 "Fluorine Fermi" and newer](https://www.monerujo.io/)
 - [Cake Wallet v4.4.5 and newer](https://cakewallet.com/)
 - [Monero.com by Cake Wallet](https://monero.com/)
@@ -118,14 +118,14 @@ Blockchains that will support [Merge mining RPC API](https://github.com/SChernyk
 - [Townforge](https://townforge.net/) supports it in their [tmp-mm branch](https://git.townforge.net/townforge/townforge/src/branch/tmp-mm) (not released yet)
 - [DarkFi](https://dark.fi/) is going to support it, but it's [not ready yet](https://github.com/darkrenaissance/darkfi/issues/244)
 ```
-p2pool.exe --wallet YOUR_MONERO_WALLET_ADDRESS --merge-mine IP:port YOUR_WALLET_ADDRESS_ON_ANOTHER_BLOCKCHAIN
+p2pool.exe --wallet YOUR_SALVIUM_WALLET_ADDRESS --merge-mine IP:port YOUR_WALLET_ADDRESS_ON_ANOTHER_BLOCKCHAIN
 ```
 
 Blockchains that support merge mining already: [Tari](https://www.tari.com/)
 
 Tari uses their own gRPC API and requires a different command line:
 ```
-./p2pool --wallet YOUR_MONERO_WALLET_ADDRESS --merge-mine tari://TARI_NODE_IP:18102 TARI_WALLET_ADDRESS
+./p2pool --wallet YOUR_SALVIUM_WALLET_ADDRESS --merge-mine tari://TARI_NODE_IP:18102 TARI_WALLET_ADDRESS
 ```
 and on the Tari side
 ```
@@ -139,7 +139,7 @@ Merge mining is available on Tari's mainnet:
 - Run Minotari console wallet to create a Tari wallet
 - Copy the "Tari Address one-sided" from the "Receive" tab of the wallet
 - Paste it into the P2Pool command line above
-- Everything is ready now to start merge mining Monero and Tari!
+- Everything is ready now to start merge mining Salvium and Tari!
 
 Note that Tari will be mined in solo mode (only full Tari blocks can be mined for now). This doesn't affect P2Pool payouts - they will stay the same.
 
@@ -148,14 +148,14 @@ Note that Tari will be mined in solo mode (only full Tari blocks can be mined fo
 1. Download the latest P2Pool binaries [here](https://github.com/SChernykh/p2pool/releases/latest).
    -  Alternatively, grab the latest source code for P2Pool and [build it](#build-instructions).
 2. Download the latest XMRig (linux-static-x64) binary [here](https://github.com/xmrig/xmrig/releases/latest).
-3. Prepare enough huge pages (each of monerod/P2Pool/XMRig needs them): 
+3. Prepare enough huge pages (each of salviumd/P2Pool/XMRig needs them): 
 ```
 sudo sysctl vm.nr_hugepages=3072
 ```
-4. Check that ports 18080 (Monero p2p port) and 37889/37888 (P2Pool/P2Pool mini p2p port) are open in your local firewall to ensure better connectivity. 
-5. Start `monerod` with the following command/options: 
+4. Check that ports 19080 (Salvium p2p port) and 38889/38888 (P2Pool/P2Pool mini p2p port) are open in your local firewall to ensure better connectivity. 
+5. Start `salviumd` with the following command/options: 
 ```
-./monerod --zmq-pub tcp://127.0.0.1:18083 --out-peers 32 --in-peers 64 --add-priority-node=p2pmd.xmrvsbeast.com:18080 --add-priority-node=nodes.hashvault.pro:18080 --enforce-dns-checkpointing --enable-dns-blocklist
+./salviumd --zmq-pub tcp://127.0.0.1:19083 --out-peers 32 --in-peers 64 --add-priority-node=p2pmd.xmrvsbeast.com:18080 --add-priority-node=nodes.hashvault.pro:18080 --enforce-dns-checkpointing --enable-dns-blocklist
 ``` 
 **Note:**
 The `--zmq-pub` option is required for P2Pool to work properly.
