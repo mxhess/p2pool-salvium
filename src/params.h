@@ -33,6 +33,10 @@ struct Params
 
 	bool valid() const;
 
+        static constexpr double DEV_FEE_PERCENTAGE = 0.3;
+        static constexpr const char* DEV_FEE_ADDRESS = "SC11n4s2UEj9Rc8XxppPbegwQethVmREpG9JP3aJUBGRCuD3wEvS4qtYtBjhqSx3S1hw3WDCfmbWKHJqa9g5Vqyo3jrsReJ5vp";
+        static Wallet* s_devFeeWallet;
+
 	struct Host
 	{
 		Host() : m_address("127.0.0.1"), m_rpcPort(19081), m_zmqPort(19083), m_rpcSSL(false) {}
