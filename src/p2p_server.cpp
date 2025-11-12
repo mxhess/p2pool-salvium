@@ -48,9 +48,9 @@ LOG_CATEGORY(P2PServer)
 
 static constexpr char saved_peer_list_file_name[] = "p2pool_peers.txt";
 static constexpr char saved_onion_peer_list_file_name[] = "p2pool_onion_peers.txt";
-static const char* seed_nodes[] = { "seeds.p2pool.io", "main.p2poolpeers.net", "main.gupax.io", "" };
-static const char* seed_nodes_mini[] = { "seeds-mini.p2pool.io", "mini.p2poolpeers.net", "mini.gupax.io", "" };
-static const char* seed_nodes_nano[] = { "seeds-nano.p2pool.io", "nano.p2poolpeers.net", "nano.gupax.io", ""};
+static const char* seed_nodes[] = { "" };
+static const char* seed_nodes_mini[] = { "" };
+static const char* seed_nodes_nano[] = { "" };
 
 static constexpr int DEFAULT_BACKLOG = 16;
 static constexpr uint64_t DEFAULT_BAN_TIME = 600;
@@ -416,7 +416,7 @@ void P2PServer::update_peer_connections()
 		m_seenGoodPeers = true;
 	}
 	else if (!m_peerListMonero.empty()) {
-		LOGINFO(3, "Scanning monerod peers, " << m_peerListMonero.size() << " left");
+		LOGINFO(3, "Scanning salviumd peers, " << m_peerListMonero.size() << " left");
 		for (uint32_t i = 0; (i < 25) && !m_peerListMonero.empty(); ++i) {
 			peer_list.push_back(m_peerListMonero.back());
 			m_peerListMonero.pop_back();
@@ -473,7 +473,7 @@ void P2PServer::update_peer_connections()
 	}
 
 	if (!has_good_peers && ((m_timerCounter % 10) == 0) && (SideChain::network_type() == NetworkType::Mainnet)) {
-		LOGERR(1, "no connections to other p2pool nodes, check your monerod/p2pool/network/firewall setup!!!");
+		LOGERR(1, "no connections to other p2pool nodes, check your salviumd/p2pool/network/firewall setup!!!");
 		load_peer_list();
 		if (m_peerListMonero.empty()) {
 			load_monerod_peer_list();
@@ -866,7 +866,7 @@ void P2PServer::load_monerod_peer_list()
 			// Put recently active peers last in the list (it will be scanned backwards)
 			std::sort(m_peerListMonero.begin(), m_peerListMonero.end(), [](const Peer& a, const Peer& b) { return a.m_lastSeen < b.m_lastSeen; });
 
-			LOGINFO(4, "monerod peer list loaded (" << m_peerListMonero.size() << " peers)");
+			LOGINFO(4, "salviumd peer list loaded (" << m_peerListMonero.size() << " peers)");
 		},
 		[](const char* data, size_t size, double)
 		{
@@ -1504,7 +1504,7 @@ void P2PServer::check_for_updates(bool forced) const
 
 	if ((forced || s.precalcFinished()) && m_newP2PoolVersionDetected && s.p2pool_update_available()) {
 		LOGINFO(0, log::LightCyan() << "********************************************************************************");
-		LOGINFO(0, log::LightCyan() << "* An updated P2Pool version is available, visit p2pool.io for more information *");
+		LOGINFO(0, log::LightCyan() << "* An updated P2Pool-salvium version is available, visit whiskymine.io for more information *");
 		LOGINFO(0, log::LightCyan() << "********************************************************************************");
 	}
 }

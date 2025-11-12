@@ -400,15 +400,15 @@ template<> struct log::Stream::Entry<XMRAmount>
 {
 	static NOINLINE void put(XMRAmount value, Stream* wrapper)
 	{
-		constexpr uint64_t denomination = 1000000000000ULL;
+		constexpr uint64_t denomination = 100000000ULL;
 
 		const int w = wrapper->getNumberWidth();
 
 		wrapper->setNumberWidth(1);
 		*wrapper << value.m_data / denomination << '.';
 
-		wrapper->setNumberWidth(12);
-		*wrapper << value.m_data % denomination << " XMR";
+		wrapper->setNumberWidth(8);
+		*wrapper << value.m_data % denomination << " SAL";
 
 		wrapper->setNumberWidth(w);
 	}

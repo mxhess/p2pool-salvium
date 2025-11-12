@@ -53,8 +53,15 @@ struct MinerShare;
 // 128 KB minus BLOCK_RESPONSE P2P protocol header (5 bytes)
 static constexpr uint64_t MAX_BLOCK_SIZE = 128 * 1024 - 5;
 
-// 0.6 XMR
-static constexpr uint64_t BASE_BLOCK_REWARD = 600000000000ULL;
+// Salvium emission constants (from cryptonote_config.h)
+static constexpr uint64_t MONEY_SUPPLY = 18440000000000000ULL;  // 184.4M * 10^8
+static constexpr uint64_t FINAL_SUBSIDY_PER_MINUTE = 30000000ULL;  // 0.3 SAL
+static constexpr uint64_t PREMINE_AMOUNT = 2210000000000000ULL;
+static constexpr int EMISSION_SPEED_FACTOR_PER_MINUTE = 21;
+static constexpr int DIFFICULTY_TARGET_V2 = 120;  // 2 minutes
+static constexpr int TARGET_MINUTES = DIFFICULTY_TARGET_V2 / 60;  // 2
+static constexpr int EMISSION_SPEED_FACTOR = EMISSION_SPEED_FACTOR_PER_MINUTE - (TARGET_MINUTES - 1);  // 20
+static constexpr uint64_t BASE_BLOCK_REWARD = FINAL_SUBSIDY_PER_MINUTE * TARGET_MINUTES;  // Tail emission
 
 // 1000 years at 1 TH/s. It should be enough for any normal use.
 static constexpr difficulty_type MAX_CUMULATIVE_DIFFICULTY{ 13019633956666736640ULL, 1710ULL };

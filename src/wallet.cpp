@@ -22,6 +22,7 @@
 #include "wallet.h"
 #include "keccak.h"
 #include "crypto.h"
+#include <ios>
 
 extern "C" {
 #include "crypto-ops.h"
@@ -35,9 +36,9 @@ namespace {
 
 // Allow only regular addresses (no integrated addresses, no subaddresses)
 // Values taken from cryptonote_config.h (CRYPTONOTE_PUBLIC_ADDRESS_BASE58_PREFIX)
-constexpr uint64_t valid_prefixes[] = { 18, 53, 24 };
 
-constexpr uint64_t valid_prefixes_subaddress[] = { 42, 63, 36 };
+constexpr uint64_t valid_prefixes[] = { 0x180c96, 0x254c96, 0x24cc96 };  // SC1, SC1T, SC1S (mainnet, testnet, stagenet)
+constexpr uint64_t valid_prefixes_subaddress[] = { 0x314c96, 0x3c54c96, 0x384cc96 };  // SC1s, SC1Ts, SC1Ss
 
 constexpr std::array<int, 9> block_sizes{ 0, 2, 3, 5, 6, 7, 9, 10, 11 };
 constexpr int num_full_blocks = p2pool::Wallet::ADDRESS_LENGTH / block_sizes.back();
@@ -113,84 +114,120 @@ Wallet& Wallet::operator=(const Wallet& w)
 
 bool Wallet::decode(const char* address)
 {
-	m_type = NetworkType::Invalid;
+        m_type = NetworkType::Invalid;
 
-	if (!address || (strlen(address) != ADDRESS_LENGTH)) {
-		return false;
-	}
+        if (!address) {
+                return false;
+        }
 
-	constexpr int last_block_size_index = block_sizes_lookup[last_block_size];
+        const size_t addr_len = strlen(address);
+        if (addr_len < 97 || addr_len > 98) {
+                return false;
+        }
 
-	static_assert(last_block_size_index >= 0, "Check ADDRESS_LENGTH");
+        // Calculate based on actual address length
+        const int actual_num_full_blocks = addr_len / block_sizes.back();
+        const int actual_last_block_size = addr_len % block_sizes.back();
+        const int actual_last_block_size_index = block_sizes_lookup[actual_last_block_size];
 
-	uint8_t data[static_cast<size_t>(num_full_blocks) * sizeof(uint64_t) + last_block_size_index] = {};
-	int data_index = 0;
+        if (actual_last_block_size_index < 0) {
+                return false;
+        }
 
-	for (int i = 0; i <= num_full_blocks; ++i) {
-		uint64_t num = 0;
-		uint64_t order = 1;
+        uint8_t data[73] = {};
+        int data_index = 0;
 
-		for (int j = ((i < num_full_blocks) ? block_sizes.back() : last_block_size) - 1; j >= 0; --j) {
-			const int8_t digit = rev_alphabet.data[static_cast<uint8_t>(address[j])];
-			if (digit < 0) {
-				return false;
-			}
+        const char* addr_ptr = address;  // Use separate pointer for iteration
 
-			uint64_t hi;
-			const uint64_t tmp = num + umul128(order, static_cast<uint64_t>(digit), &hi);
-			if ((tmp < num) || hi) {
-				return false;
-			}
+        for (int i = 0; i <= actual_num_full_blocks; ++i) {
+                uint64_t num = 0;
+                uint64_t order = 1;
 
-			num = tmp;
-			order *= alphabet_size;
-		}
+                for (int j = ((i < actual_num_full_blocks) ? block_sizes.back() : actual_last_block_size) - 1; j >= 0; --j) {
+                        const int8_t digit = rev_alphabet.data[static_cast<uint8_t>(addr_ptr[j])];
+                        if (digit < 0) {
+                                return false;
+                        }
 
-		address += block_sizes.back();
+                        uint64_t hi;
+                        const uint64_t tmp = num + umul128(order, static_cast<uint64_t>(digit), &hi);
+                        if ((tmp < num) || hi) {
+                                return false;
+                        }
 
-		for (int j = static_cast<int>((i < num_full_blocks) ? sizeof(num) : last_block_size_index) - 1; j >= 0; --j) {
-			data[data_index++] = static_cast<uint8_t>(num >> (j * 8));
-		}
-	}
+                        num = tmp;
+                        order *= alphabet_size;
+                }
 
-	m_prefix = data[0];
+                addr_ptr += (i < actual_num_full_blocks) ? block_sizes.back() : actual_last_block_size;  // Advance by actual size
 
-	switch (m_prefix)
-	{
-	case valid_prefixes[0]: m_type = NetworkType::Mainnet;  break;
-	case valid_prefixes[1]: m_type = NetworkType::Testnet;  break;
-	case valid_prefixes[2]: m_type = NetworkType::Stagenet; break;
+                for (int j = static_cast<int>((i < actual_num_full_blocks) ? sizeof(num) : actual_last_block_size_index) - 1; j >= 0; --j) {
+                        data[data_index++] = static_cast<uint8_t>(num >> (j * 8));
+                }
+        }
 
-	case valid_prefixes_subaddress[0]: m_type = NetworkType::Mainnet;  m_subaddress = true; break;
-	case valid_prefixes_subaddress[1]: m_type = NetworkType::Testnet;  m_subaddress = true; break;
-	case valid_prefixes_subaddress[2]: m_type = NetworkType::Stagenet; m_subaddress = true; break;
+        // Decode varint tag from start of data
+        uint64_t tag = 0;
+        int varint_len = 0;
+        for (int i = 0; i < 8; ++i) {
+                tag |= static_cast<uint64_t>(data[i] & 0x7F) << (i * 7);
+                ++varint_len;
+                if ((data[i] & 0x80) == 0) {
+                        break;
+                }
+        }
 
-	default:
-		return false;
-	}
+        char hex_buf[32];
+        snprintf(hex_buf, sizeof(hex_buf), "0x%lx", tag);
 
-	memcpy(m_spendPublicKey.h, data + 1, HASH_SIZE);
-	memcpy(m_viewPublicKey.h, data + 1 + HASH_SIZE, HASH_SIZE);
-	memcpy(&m_checksum, data + 1 + HASH_SIZE * 2, sizeof(m_checksum));
+        m_prefix = tag;
 
-	uint8_t md[200];
-	keccak(data, sizeof(data) - sizeof(m_checksum), md);
+        switch (m_prefix)
+        {
+        case valid_prefixes[0]: m_type = NetworkType::Mainnet;  break;
+        case valid_prefixes[1]: m_type = NetworkType::Testnet;  break;
+        case valid_prefixes[2]: m_type = NetworkType::Stagenet; break;
 
-	if (memcmp(&m_checksum, md, sizeof(m_checksum)) != 0) {
-		m_type = NetworkType::Invalid;
-	}
+        case valid_prefixes_subaddress[0]: m_type = NetworkType::Mainnet;  m_subaddress = true; break;
+        case valid_prefixes_subaddress[1]: m_type = NetworkType::Testnet;  m_subaddress = true; break;
+        case valid_prefixes_subaddress[2]: m_type = NetworkType::Stagenet; m_subaddress = true; break;
 
-	ge_p3 point;
-	if ((ge_frombytes_vartime(&point, m_spendPublicKey.h) != 0) || (ge_frombytes_vartime(&point, m_viewPublicKey.h) != 0)) {
-		m_type = NetworkType::Invalid;
-	}
+        default:
+                return false;
+        }
 
-	if (!torsion_check()) {
-		LOGWARN(1, "Torsion check failed for wallet " << *this << "! It will not be compatible with FCMP++.");
-		// TODO: add "m_type = NetworkType::Invalid;" and return false in a later release, closer to FCMP++ hardfork
-	}
+        memcpy(m_spendPublicKey.h, data + varint_len, HASH_SIZE);
+        memcpy(m_viewPublicKey.h, data + varint_len + HASH_SIZE, HASH_SIZE);
 
-	return valid();
+        // Load checksum from correct position (at end of decoded data)
+        memcpy(&m_checksum, data + data_index - sizeof(m_checksum), sizeof(m_checksum));
+
+        uint8_t md[200];
+        keccak(data, data_index - sizeof(m_checksum), md);
+
+        uint32_t calculated_checksum;
+        memcpy(&calculated_checksum, md, sizeof(calculated_checksum));
+
+        if (m_checksum != calculated_checksum) {
+                LOGINFO(1, "Checksum FAILED");
+                m_type = NetworkType::Invalid;
+        }
+
+        if (memcmp(&m_checksum, md, sizeof(m_checksum)) != 0) {
+                LOGINFO(1, "Checksum FAILED");
+                m_type = NetworkType::Invalid;
+        }
+
+        ge_p3 point;
+        if ((ge_frombytes_vartime(&point, m_spendPublicKey.h) != 0) || (ge_frombytes_vartime(&point, m_viewPublicKey.h) != 0)) {
+                m_type = NetworkType::Invalid;
+        }
+
+        if (!torsion_check()) {
+                LOGWARN(1, "Torsion check failed for wallet " << *this << "! It will not be compatible with FCMP++.");
+        }
+
+        return valid();
 }
 
 bool Wallet::assign(const hash& spend_pub_key, const hash& view_pub_key, NetworkType type, bool subaddress)

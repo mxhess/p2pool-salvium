@@ -166,8 +166,18 @@ BlockTemplate& BlockTemplate::operator=(const BlockTemplate& b)
 
 static FORCEINLINE uint64_t get_base_reward(uint64_t already_generated_coins)
 {
-	const uint64_t result = ~already_generated_coins >> 19;
-	return (result < BASE_BLOCK_REWARD) ? BASE_BLOCK_REWARD : result;
+        // Salvium emission formula
+        if (already_generated_coins == 0) {
+                return PREMINE_AMOUNT;
+        }
+        
+        uint64_t base_reward = (MONEY_SUPPLY - already_generated_coins) >> EMISSION_SPEED_FACTOR;
+        
+        if (base_reward < BASE_BLOCK_REWARD) {
+                base_reward = BASE_BLOCK_REWARD;
+        }
+        
+        return base_reward;
 }
 
 static FORCEINLINE uint64_t get_block_reward(uint64_t base_reward, uint64_t median_weight, uint64_t fees, uint64_t weight)
@@ -332,7 +342,10 @@ void BlockTemplate::update(const MinerData& data, const Mempool& mempool, const 
 
 	select_mempool_transactions(mempool);
 
-	const uint64_t base_reward = get_base_reward(data.already_generated_coins);
+	uint64_t base_reward = get_base_reward(data.already_generated_coins);
+
+        // Salvium: 20% goes to staking, miners get 80%
+        base_reward = (base_reward * 4) / 5;  // 80% of total reward
 
 	uint64_t total_tx_fees = 0;
 	uint64_t total_tx_weight = 0;

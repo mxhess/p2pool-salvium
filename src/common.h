@@ -125,6 +125,7 @@ constexpr uint8_t EXTRA_NONCE_MAX_SIZE = EXTRA_NONCE_SIZE + 10;
 constexpr uint8_t TX_VERSION = 2;
 constexpr uint8_t TXIN_GEN = 0xFF;
 constexpr uint8_t TXOUT_TO_TAGGED_KEY = 3;
+constexpr uint8_t TXOUT_TO_CARROT_V1 = 4;
 constexpr uint8_t TX_EXTRA_TAG_PUBKEY = 1;
 constexpr uint8_t TX_EXTRA_NONCE = 2;
 constexpr uint8_t TX_EXTRA_MERGE_MINING_TAG = 3;

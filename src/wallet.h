@@ -24,10 +24,7 @@ namespace p2pool {
 class Wallet
 {
 public:
-	// public keys: 64 bytes -> 88 characters in base58
-	// prefix (1 byte) + checksum (4 bytes) -> 7 characters in base58
-	// 95 characters in total
-	static constexpr int ADDRESS_LENGTH = 95;
+	static constexpr int ADDRESS_LENGTH = 97;
 
 	explicit Wallet(const char* address);
 

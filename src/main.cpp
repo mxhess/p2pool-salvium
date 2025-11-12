@@ -58,13 +58,13 @@
 
 void p2pool_usage()
 {
-	printf("P2Pool %s\n"
+	printf("P2Pool-Salvium %s\n"
 		"\nUsage:\n\n" \
-		"--wallet              Main wallet address (the one that starts with 4...). To mine to a subaddress of this wallet, use it together with --subaddress\n"
+		"--wallet              Main wallet address (the one that starts with SC1...). To mine to a subaddress of this wallet, use it together with --subaddress\n"
 		"--subaddress          Subaddress to mine to. It must belong to the same wallet that was specified with --wallet parameter\n"
-		"--host                IP address of your Monero node, default is 127.0.0.1\n"
-		"--rpc-port            monerod RPC API port number, default is 18081\n"
-		"--zmq-port            monerod ZMQ pub port number, default is 18083 (same port as in monerod's \"--zmq-pub\" command line parameter)\n"
+		"--host                IP address of your Salvium node, default is 127.0.0.1\n"
+		"--rpc-port            salviumd RPC API port number, default is 19081\n"
+		"--zmq-port            salviumd ZMQ pub port number, default is 19083 (same port as in salviumd's \"--zmq-pub\" command line parameter)\n"
 		"--stratum             Comma-separated list of IP:port for stratum server to listen on\n"
 		"--p2p                 Comma-separated list of IP:port for p2p server to listen on\n"
 		"--addpeers            Comma-separated list of IP:port of other p2pool nodes to connect to\n"
@@ -79,7 +79,7 @@ void p2pool_usage()
 		"--no-cache            Disable p2pool.cache\n"
 		"--no-color            Disable colors in console output\n"
 #ifdef WITH_RANDOMX
-		"--no-randomx          Disable internal RandomX hasher: p2pool will use RPC calls to monerod to check PoW hashes\n"
+		"--no-randomx          Disable internal RandomX hasher: p2pool will use RPC calls to salviumd to check PoW hashes\n"
 #endif
 		"--out-peers N         Maximum number of outgoing connections for p2p server (any value between 10 and 450)\n"
 		"--in-peers N          Maximum number of incoming connections for p2p server (any value between 10 and 450)\n"
@@ -87,7 +87,7 @@ void p2pool_usage()
 		"--mini                Connect to p2pool-mini sidechain. Note that it will also change default p2p port from %d to %d\n"
 		"--nano                Connect to p2pool-nano sidechain. Note that it will also change default p2p port from %d to %d\n"
 		"--no-autodiff         Disable automatic difficulty adjustment for miners connected to stratum (WARNING: incompatible with Nicehash and MRR)\n"
-		"--rpc-login           Specify username[:password] required for Monero RPC server\n"
+		"--rpc-login           Specify username[:password] required for Salvium RPC server\n"
 		"--socks5              Specify IP:port of a SOCKS5 proxy to use for outgoing connections\n"
 		"--no-dns              Disable DNS queries, use only IP addresses to connect to peers (seed node DNS will be unavailable too)\n"
 		"--p2p-external-port   Port number that your router uses for mapping to your local p2p port. Use it if you are behind a NAT and still want to accept incoming connections\n"
@@ -96,13 +96,13 @@ void p2pool_usage()
 		"--no-igd              An alias for --no-upnp\n"
 		"--upnp-stratum        Port forward Stratum port (it's not forwarded by default)\n"
 #endif
-		"--merge-mine          IP:port and wallet address for another blockchain to merge mine with\n"
+//		"--merge-mine          IP:port and wallet address for another blockchain to merge mine with\n"
 		"--version             Print p2pool's version and build details\n"
 #ifdef WITH_TLS
 		"--tls-cert file       Load TLS certificate chain from \"file\" in the PEM format\n"
 		"--tls-cert-key file   Load TLS certificate private key from \"file\" in the PEM format\n"
-		"--rpc-ssl             Enable SSL on RPC connections to the Monero node\n"
-		"--rpc-ssl-fingerprint base64-encoded fingerprint of the Monero node's certificate (optional, use it for certificate pinning)\n"
+		"--rpc-ssl             Enable SSL on RPC connections to the Salvium node\n"
+		"--rpc-ssl-fingerprint base64-encoded fingerprint of the Salvium node's certificate (optional, use it for certificate pinning)\n"
 #endif
 		"--no-stratum-http     Disable HTTP on Stratum ports\n"
 		"--full-validation     Enables full share validation / increases CPU usage\n"
@@ -110,7 +110,7 @@ void p2pool_usage()
 		"--no-clearnet-p2p     Forces P2P server to listen on 127.0.0.1 and to not connect to clearnet IPs\n"
 		"--help                Show this help message\n\n"
 		"Example command line:\n\n"
-		"%s --host 127.0.0.1 --rpc-port 18081 --zmq-port 18083 --wallet YOUR_WALLET_ADDRESS --stratum 0.0.0.0:%d --p2p 0.0.0.0:%d\n\n",
+		"%s-salvium --host 127.0.0.1 --rpc-port 19081 --zmq-port 19083 --wallet YOUR_WALLET_ADDRESS --stratum 0.0.0.0:%d --p2p 0.0.0.0:%d\n\n",
 		p2pool::VERSION,
 		static_cast<uint32_t>(p2pool::DEFAULT_STRATUM_BAN_TIME),
 		p2pool::log::MAX_GLOBAL_LOG_LEVEL,

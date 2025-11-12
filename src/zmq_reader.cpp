@@ -348,47 +348,83 @@ static std::vector<uint8_t> construct_monero_block_blob(rapidjson::Value* value,
 	writeVarint(arr.Size(), blob);
 
 	for (auto* i = arr.begin(); i != arr.end(); ++i) {
+
 		auto amount = i->FindMember("amount");
 		if ((amount == i->MemberEnd()) || !amount->value.IsUint64()) {
 			LOGWARN(3, "construct_monero_block_blob: amount not found or is not UInt64");
 			return empty_blob;
 		}
 
-		auto to_tagged_key = i->FindMember("to_tagged_key");
-		if ((to_tagged_key == i->MemberEnd()) || !to_tagged_key->value.IsObject()) {
-			LOGWARN(3, "construct_monero_block_blob: to_tagged_key not found or is not an object");
-			return empty_blob;
-		}
+                // Salvium uses target.carrot_v1 instead of to_tagged_key
+                auto target = i->FindMember("target");
+                if ((target == i->MemberEnd()) || !target->value.IsObject()) {
+                //        LOGWARN(3, "construct_salvium_block_blob: target not found or is not an object");
+                        continue;
+                }
+                
+                auto carrot_v1 = target->value.FindMember("carrot_v1");
+                if ((carrot_v1 == target->value.MemberEnd()) || !carrot_v1->value.IsObject()) {
+                        LOGWARN(3, "construct_salvium_block_blob: carrot_v1 not found or is not an object");
+                        return empty_blob;
+                }
+                
+                auto key = carrot_v1->value.FindMember("key");
+                if ((key == carrot_v1->value.MemberEnd()) || !key->value.IsString()) {
+                        LOGWARN(3, "construct_salvium_block_blob: key not found or is not a string");
+                        return empty_blob;
+                }
+                
+                auto asset_type = carrot_v1->value.FindMember("asset_type");
+                if ((asset_type == carrot_v1->value.MemberEnd()) || !asset_type->value.IsString()) {
+                        LOGWARN(3, "construct_salvium_block_blob: asset_type not found or is not a string");
+                        return empty_blob;
+                }
+                
+                auto view_tag = carrot_v1->value.FindMember("view_tag");
+                if ((view_tag == carrot_v1->value.MemberEnd()) || !view_tag->value.IsString()) {
+                        LOGWARN(3, "construct_salvium_block_blob: view_tag not found or is not a string");
+                        return empty_blob;
+                }
+                
+                auto encrypted_janus_anchor = carrot_v1->value.FindMember("encrypted_janus_anchor");
+                if ((encrypted_janus_anchor == carrot_v1->value.MemberEnd()) || !encrypted_janus_anchor->value.IsString()) {
+                        LOGWARN(3, "construct_salvium_block_blob: encrypted_janus_anchor not found or is not a string");
+                        return empty_blob;
+                }
+                
+                // Serialize: amount + type + key + asset_type + view_tag + encrypted_janus_anchor
+                writeVarint(amount->value.GetUint64(), blob);
+                blob.push_back(TXOUT_TO_CARROT_V1);
+                
+                // Key (32 bytes)
+                if (!from_hex(key->value.GetString(), key->value.GetStringLength(), h)) {
+                        LOGWARN(3, "construct_salvium_block_blob: invalid key " << key->value.GetString());
+                        return empty_blob;
+                }
+                blob.insert(blob.end(), h.h, h.h + HASH_SIZE);
+                
+                // Asset type (string with length prefix)
+                const char* asset_str = asset_type->value.GetString();
+                const size_t asset_len = asset_type->value.GetStringLength();
+                writeVarint(asset_len, blob);
+                blob.insert(blob.end(), asset_str, asset_str + asset_len);
+                
+                // View tag (3 bytes)
+                std::vector<uint8_t> vt;
+                if (!from_hex(view_tag->value.GetString(), view_tag->value.GetStringLength(), vt) || (vt.size() != 3)) {
+                        LOGWARN(3, "construct_salvium_block_blob: invalid view_tag " << view_tag->value.GetString());
+                        return empty_blob;
+                }
+                blob.insert(blob.end(), vt.begin(), vt.end());
+                
+                // Encrypted janus anchor (16 bytes)
+                std::vector<uint8_t> eja;
+                if (!from_hex(encrypted_janus_anchor->value.GetString(), encrypted_janus_anchor->value.GetStringLength(), eja) || (eja.size() != 16)) {
+                        LOGWARN(3, "construct_salvium_block_blob: invalid encrypted_janus_anchor " << encrypted_janus_anchor->value.GetString());
+                        return empty_blob;
+                }
+                blob.insert(blob.end(), eja.begin(), eja.end());
 
-		auto key = to_tagged_key->value.FindMember("key");
-		if ((key == to_tagged_key->value.MemberEnd()) || !key->value.IsString()) {
-			LOGWARN(3, "construct_monero_block_blob: key not found or is not a string");
-			return empty_blob;
-		}
-
-		auto view_tag = to_tagged_key->value.FindMember("view_tag");
-		if ((view_tag == to_tagged_key->value.MemberEnd()) || !view_tag->value.IsString()) {
-			LOGWARN(3, "construct_monero_block_blob: view_tag not found or is not a string");
-			return empty_blob;
-		}
-
-		writeVarint(amount->value.GetUint64(), blob);
-		blob.push_back(TXOUT_TO_TAGGED_KEY);
-
-		if (!from_hex(key->value.GetString(), key->value.GetStringLength(), h)) {
-			LOGWARN(3, "construct_monero_block_blob: invalid key " << key->value.GetString());
-			return empty_blob;
-		}
-
-		blob.insert(blob.end(), h.h, h.h + HASH_SIZE);
-
-		std::vector<uint8_t> t;
-		if (!from_hex(view_tag->value.GetString(), view_tag->value.GetStringLength(), t) || (t.size() != 1)) {
-			LOGWARN(3, "construct_monero_block_blob: invalid view_tag " << view_tag->value.GetString());
-			return empty_blob;
-		}
-
-		blob.push_back(t[0]);
 	}
 
 	std::vector<uint8_t> t;

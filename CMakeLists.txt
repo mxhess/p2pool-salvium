@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.10)
-project(p2pool)
+project(p2pool-salvium)
 
 include(cmake/standard.cmake)
 
