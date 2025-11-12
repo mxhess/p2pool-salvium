@@ -172,6 +172,8 @@ std::vector<uint8_t> PoolBlock::serialize_mainchain_data(size_t* header_size, si
 
 	writeVarint(m_outputAmounts.size(), data);
 
+        LOGINFO(3, "serialize_mainchain_data: writing " << m_outputAmounts.size() << " outputs, offset=" << outputs_offset0);
+
 	for (size_t i = 0, n = m_outputAmounts.size(); i < n; ++i) {
 		const TxOutput& output = m_outputAmounts[i];
 
