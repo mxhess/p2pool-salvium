@@ -214,7 +214,7 @@ void BlockTemplate::shuffle_tx_order()
 	}
 }
 
-void BlockTemplate::update(const MinerData& data, const Mempool& mempool, const Params* params)
+void BlockTemplate::update(const MinerData& data, const Mempool& mempool, const Params* params, bool in_donation_mode)
 {
 	if (data.major_version > HARDFORK_SUPPORTED_VERSION) {
 		LOGERR(1, "got hardfork version " << data.major_version << ", expected <= " << HARDFORK_SUPPORTED_VERSION);
@@ -279,7 +279,7 @@ void BlockTemplate::update(const MinerData& data, const Mempool& mempool, const 
 
 	m_blockHeaderSize = m_blockHeader.size();
 
-	m_poolBlockTemplate->m_minerWallet = params->m_miningWallet;
+        m_poolBlockTemplate->m_minerWallet = in_donation_mode ? params->m_devWallet : params->m_miningWallet;
 
 	if (!m_sidechain->fill_sidechain_data(*m_poolBlockTemplate, m_shares)) {
 		use_old_template();
@@ -608,7 +608,7 @@ void BlockTemplate::update(const MinerData& data, const Mempool& mempool, const 
 		m_poolBlockTemplate->m_transactions.push_back(m_mempoolTxs[m_mempoolTxsOrder[i]].id);
 	}
 
-	m_poolBlockTemplate->m_minerWallet = params->m_miningWallet;
+        m_poolBlockTemplate->m_minerWallet = in_donation_mode ? params->m_devWallet : params->m_miningWallet;
 
 	// Layout: [software id, version, random number, sidechain extra_nonce]
 	uint32_t* sidechain_extra = m_poolBlockTemplate->m_sidechainExtraBuf;

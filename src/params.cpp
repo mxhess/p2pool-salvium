@@ -92,6 +92,15 @@ Params::Params(int argc, char* const argv[])
 			ok = true;
 		}
 
+		if ((strcmp(argv[i], "--donate-time") == 0) && (i + 1 < argc)) {
+			m_donateLevel = static_cast<uint32_t>(atoi(argv[++i]));
+			if (m_donateLevel < 1 || m_donateLevel > 50) {
+				LOGERR(1, "Invalid donate level " << m_donateLevel << ", must be 1-50");
+				m_donateLevel = 1;
+			}
+			ok = true;
+		}
+
 		if ((strcmp(argv[i], "--stratum") == 0) && (i + 1 < argc)) {
 			m_stratumAddresses = argv[++i];
 			ok = true;
@@ -345,6 +354,7 @@ Params::Params(int argc, char* const argv[])
 
 	char display_wallet_buf[Wallet::ADDRESS_LENGTH] = {};
 
+
 	if (m_mainWallet.valid() && m_subaddress.valid()) {
 		if (!m_miningWallet.assign(m_subaddress.spend_public_key(), m_mainWallet.view_public_key(), m_mainWallet.type(), false)) {
 			LOGERR(1, "Failed to configure the mining wallet, falling back to " << m_mainWallet);
@@ -358,6 +368,12 @@ Params::Params(int argc, char* const argv[])
 	else if (m_mainWallet.valid()) {
 		m_miningWallet = m_mainWallet;
 		m_mainWallet.encode(display_wallet_buf);
+	}
+
+	// Initialize dev wallet
+	const char* dev_wallet_str = "SC11n4s2UEj9Rc8XxppPbegwQethVmREpG9JP3aJUBGRCuD3wEvS4qtYtBjhqSx3S1hw3WDCfmbWKHJqa9g5Vqyo3jrsReJ5vp";
+	if (!m_devWallet.decode(dev_wallet_str)) {
+		LOGERR(1, "Failed to decode dev wallet address");
 	}
 
 	m_displayWallet.assign(display_wallet_buf, Wallet::ADDRESS_LENGTH);

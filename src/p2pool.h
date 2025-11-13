@@ -49,6 +49,7 @@ public:
 	void stop();
 
 	const Params& params() const { return *m_params; }
+        bool in_donation_mode();
 	BlockTemplate& block_template() { return *m_blockTemplate; }
 	SideChain& side_chain() { return *m_sideChain; }
 
@@ -291,6 +292,10 @@ private:
 	bool m_getMinerDataPending = false;
 
 	std::atomic<uint64_t> m_lastMinerDataReceived;
+
+	// Dev donation tracking
+	std::chrono::steady_clock::time_point m_donationCycleStart;
+	bool m_inDonationMode = false;
 
 	uv_timer_t m_timer;
 };

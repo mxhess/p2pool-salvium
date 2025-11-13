@@ -16,6 +16,7 @@
  */
 
 #include "common.h"
+#include <chrono>
 #include "p2pool.h"
 #ifndef P2POOL_UNIT_TESTS
 #include "zmq_reader.h"
@@ -70,6 +71,8 @@ p2pool::p2pool(int argc, char* argv[])
 	, m_zmqLastActive(0)
 	, m_startTime(seconds_since_epoch())
 	, m_lastMinerDataReceived(0)
+        , m_donationCycleStart(std::chrono::steady_clock::now())
+        , m_inDonationMode(false)
 {
 	LOGINFO(1, log::LightCyan() << VERSION);
 
@@ -348,6 +351,40 @@ void p2pool::print_hosts() const
 			LOGINFO(0, "   " << h.m_displayName << static_cast<const char*>(buf));
 		}
 	}
+}
+
+bool p2pool::in_donation_mode()
+{
+	using namespace std::chrono;
+	
+	const auto now = steady_clock::now();
+	const auto elapsed = duration_cast<minutes>(now - m_donationCycleStart);
+	
+	const uint32_t cycle_minutes = 100;
+	const uint32_t donate_minutes = m_params->m_donateLevel;
+	const uint32_t normal_minutes = cycle_minutes - donate_minutes;
+	
+	// Check if we need to start a new cycle
+	if (elapsed >= minutes(cycle_minutes)) {
+		m_donationCycleStart = now;
+		m_inDonationMode = false;
+		return false;
+	}
+	
+	// Check if we should be in donation mode
+	const bool should_donate = (elapsed >= minutes(normal_minutes));
+	
+	// Log transitions
+	if (should_donate && !m_inDonationMode) {
+		m_inDonationMode = true;
+		LOGINFO(0, log::LightCyan() << "Entering dev donation mode for " << log::LightGreen() << donate_minutes << log::LightCyan() << " minute(s)");
+	}
+	else if (!should_donate && m_inDonationMode) {
+		m_inDonationMode = false;
+		LOGINFO(0, log::LightCyan() << "Dev donation cycle complete");
+	}
+	
+	return m_inDonationMode;
 }
 
 bool p2pool::calculate_hash(const void* data, size_t size, uint64_t height, const hash& seed, hash& result, bool force_light_mode)
@@ -1253,7 +1290,7 @@ void p2pool::update_block_template()
 	if (m_updateSeed.exchange(false)) {
 		m_hasher->set_seed_async(data.seed_hash);
 	}
-	m_blockTemplate->update(data, *m_mempool, m_params);
+	m_blockTemplate->update(data, *m_mempool, m_params, in_donation_mode());
 	stratum_on_block();
 	api_update_pool_stats();
 

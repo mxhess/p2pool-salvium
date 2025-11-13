@@ -82,6 +82,9 @@ struct Params
 
 	std::string m_displayWallet;
 
+	uint32_t m_donateLevel = 1;  // Minutes per 100 minutes (default 1%)
+	Wallet m_devWallet{ nullptr };
+
 	std::string m_stratumAddresses;
 	std::string m_p2pAddresses;
 	std::string m_p2pPeerList;
