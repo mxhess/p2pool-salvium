@@ -1752,48 +1752,16 @@ void SideChain::verify(PoolBlock* block)
 		return;
 	}
 
-        // Expect shares.size() + 1 outputs (dev fee + miner outputs)
-        if (shares.size() + 1 != block->m_outputAmounts.size()) {
-                LOGWARN(3, "block at height = " << block->m_sidechainHeight 
-                        << ", id = " << block->m_sidechainId  // ADD << here
-                        << ", mainchain height = " << block->m_txinGenHeight
-                        << " has invalid number of outputs: got " << block->m_outputAmounts.size() << ", expected " << (shares.size() + 1));
-                block->m_invalid = true;
-                return;
-        }
+	if (shares.size() != block->m_outputAmounts.size()) {
+		LOGWARN(3, "block at height = " << block->m_sidechainHeight <<
+			", id = " << block->m_sidechainId <<
+			", mainchain height = " << block->m_txinGenHeight
+			<< " has invalid number of outputs: got " << block->m_outputAmounts.size() << ", expected " << shares.size());
+		block->m_invalid = true;
+		return;
+	}
 
-        // Validate dev fee (first output)
-        const PoolBlock::TxOutput& dev_output = block->m_outputAmounts[0];
-        const uint64_t total_miner_reward = std::accumulate(block->m_outputAmounts.begin() + 1, block->m_outputAmounts.end(), 0ULL,
-                [](uint64_t a, const PoolBlock::TxOutput& b) { return a + b.m_reward; });
-        const uint64_t expected_dev_fee = static_cast<uint64_t>(total_miner_reward * (Params::DEV_FEE_PERCENTAGE / 100.0));
-        
-        if (dev_output.m_reward != expected_dev_fee) {
-                LOGWARN(3, "block at height = " << block->m_sidechainHeight 
-                        << ", id = " << block->m_sidechainId  // ADD << here
-                        << " has invalid dev fee: got " << dev_output.m_reward << ", expected " << expected_dev_fee);
-                block->m_invalid = true;
-                return;
-        }
-
-        // Validate dev fee address
-        hash expected_dev_eph_key;
-        uint8_t expected_dev_view_tag;
-        if (!Params::s_devFeeWallet->get_eph_public_key(block->m_txkeySec, 0, expected_dev_eph_key, expected_dev_view_tag)) {
-                LOGWARN(3, "block at height = " << block->m_sidechainHeight << " failed to generate dev fee eph key");
-                block->m_invalid = true;
-                return;
-        }
-        
-        if (block->m_ephPublicKeys[0] != expected_dev_eph_key) {
-                LOGWARN(3, "block at height = " << block->m_sidechainHeight 
-                        << ", id = " << block->m_sidechainId  // ADD << here
-                        << " has invalid dev fee address");
-                block->m_invalid = true;
-                return;
-        }
-
-        uint64_t total_reward = std::accumulate(block->m_outputAmounts.begin() + 1, block->m_outputAmounts.end(), 0ULL,
+	uint64_t total_reward = std::accumulate(block->m_outputAmounts.begin(), block->m_outputAmounts.end(), 0ULL,
 		[](uint64_t a, const PoolBlock::TxOutput& b)
 		{
 			return a + b.m_reward;
@@ -1808,7 +1776,7 @@ void SideChain::verify(PoolBlock* block)
 		return;
 	}
 
-        if (rewards.size() != block->m_outputAmounts.size() - 1) {
+	if (rewards.size() != block->m_outputAmounts.size()) {
 		LOGWARN(3, "block at height = " << block->m_sidechainHeight <<
 			", id = " << block->m_sidechainId <<
 			", mainchain height = " << block->m_txinGenHeight
@@ -1817,10 +1785,10 @@ void SideChain::verify(PoolBlock* block)
 		return;
 	}
 
-        for (size_t i = 0, n = rewards.size(); i < n; ++i) {
-                const PoolBlock::TxOutput& out = block->m_outputAmounts[i + 1];  // +1 to skip dev fee
+	for (size_t i = 0, n = rewards.size(); i < n; ++i) {
+		const PoolBlock::TxOutput& out = block->m_outputAmounts[i];
 
-                if (rewards[i] != out.m_reward) {
+		if (rewards[i] != out.m_reward) {
 			LOGWARN(3, "block at height = " << block->m_sidechainHeight <<
 				", id = " << block->m_sidechainId <<
 				", mainchain height = " << block->m_txinGenHeight <<

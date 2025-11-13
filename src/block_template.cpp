@@ -905,27 +905,27 @@ int BlockTemplate::create_miner_tx(const MinerData& data, const std::vector<Mine
 	// Miner transaction (coinbase)
 	m_minerTx.clear();
 
-        // Calculate dev fee from total pool block reward
-        const uint64_t total_miner_reward = std::accumulate(m_rewards.begin(), m_rewards.end(), 0ULL);
-        const uint64_t dev_fee = static_cast<uint64_t>(total_miner_reward * (Params::DEV_FEE_PERCENTAGE / 100.0));
-        
-        // Miner transaction (coinbase)
-        m_minerTx.clear();
-        const size_t num_outputs = shares.size() + 1;  // +1 for dev fee
-        m_minerTx.reserve(num_outputs * 39 + 55);
-        // tx version
-        m_minerTx.push_back(TX_VERSION);
-        // Unlock time
-        writeVarint(data.height + MINER_REWARD_UNLOCK_TIME, m_minerTx);
-        // Number of inputs
-        m_minerTx.push_back(1);
-        // Input type (txin_gen)
-        m_minerTx.push_back(TXIN_GEN);
-        // txin_gen height
-        writeVarint(data.height, m_minerTx);
-        m_poolBlockTemplate->m_txinGenHeight = data.height;
-        // Number of outputs (dev fee + miners)
-        writeVarint(num_outputs, m_minerTx);
+	const size_t num_outputs = shares.size();
+	m_minerTx.reserve(num_outputs * 39 + 55);
+
+	// tx version
+	m_minerTx.push_back(TX_VERSION);
+
+	// Unlock time
+	writeVarint(data.height + MINER_REWARD_UNLOCK_TIME, m_minerTx);
+
+	// Number of inputs
+	m_minerTx.push_back(1);
+
+	// Input type (txin_gen)
+	m_minerTx.push_back(TXIN_GEN);
+
+	// txin_gen height
+	writeVarint(data.height, m_minerTx);
+	m_poolBlockTemplate->m_txinGenHeight = data.height;
+
+	// Number of outputs (1 output per miner)
+	writeVarint(num_outputs, m_minerTx);
 
 	m_poolBlockTemplate->m_ephPublicKeys.clear();
 	m_poolBlockTemplate->m_outputAmounts.clear();
@@ -933,23 +933,8 @@ int BlockTemplate::create_miner_tx(const MinerData& data, const std::vector<Mine
 	m_poolBlockTemplate->m_ephPublicKeys.reserve(num_outputs);
 	m_poolBlockTemplate->m_outputAmounts.reserve(num_outputs);
 
-        uint64_t reward_amounts_weight = 0;
-        writeVarint(dev_fee, [this, &reward_amounts_weight](uint8_t b) {
-                m_minerTx.push_back(b);
-                ++reward_amounts_weight;
-        });
-        m_minerTx.push_back(TXOUT_TO_TAGGED_KEY);
-        uint8_t dev_view_tag = 0;
-        hash dev_eph_public_key;
-        if (!Params::s_devFeeWallet->get_eph_public_key(m_poolBlockTemplate->m_txkeySec, 0, dev_eph_public_key, dev_view_tag)) {
-                LOGERR(1, "get_eph_public_key failed for dev fee");
-        }
-        m_minerTx.insert(m_minerTx.end(), dev_eph_public_key.h, dev_eph_public_key.h + HASH_SIZE);
-        m_poolBlockTemplate->m_ephPublicKeys.emplace_back(dev_eph_public_key);
-        m_poolBlockTemplate->m_outputAmounts.emplace_back(dev_fee, dev_view_tag);
-        m_minerTx.emplace_back(dev_view_tag);
-        
-        for (size_t i = 0; i < num_outputs - 1; ++i) {
+	uint64_t reward_amounts_weight = 0;
+	for (size_t i = 0; i < num_outputs; ++i) {
 		writeVarint(m_rewards[i], [this, &reward_amounts_weight](uint8_t b)
 			{
 				m_minerTx.push_back(b);
@@ -964,7 +949,7 @@ int BlockTemplate::create_miner_tx(const MinerData& data, const std::vector<Mine
 		}
 		else {
 			hash eph_public_key;
-                        if (!shares[i].m_wallet->get_eph_public_key(m_poolBlockTemplate->m_txkeySec, i + 1, eph_public_key, view_tag)) {
+			if (!shares[i].m_wallet->get_eph_public_key(m_poolBlockTemplate->m_txkeySec, i, eph_public_key, view_tag)) {
 				LOGERR(1, "get_eph_public_key failed at index " << i);
 			}
 			m_minerTx.insert(m_minerTx.end(), eph_public_key.h, eph_public_key.h + HASH_SIZE);
@@ -975,20 +960,16 @@ int BlockTemplate::create_miner_tx(const MinerData& data, const std::vector<Mine
 		m_minerTx.emplace_back(view_tag);
 	}
 
-        // Calculate dev fee weight for comparison
-        uint64_t dev_fee_weight = 0;
-        writeVarint(dev_fee, [&dev_fee_weight](uint8_t) { ++dev_fee_weight; });
-        
-        if (dry_run) {
-                if (reward_amounts_weight != max_reward_amounts_weight + dev_fee_weight) {
-                        LOGERR(1, "create_miner_tx: incorrect miner rewards during the dry run (" << reward_amounts_weight << " != " <<  (max_reward_amounts_weight + dev_fee_weight) << ")");
-                        return -1;
-                }
-        }
-        else if (reward_amounts_weight > max_reward_amounts_weight + dev_fee_weight) {
-                LOGERR(1, "create_miner_tx: incorrect miner rewards during the real run (" << reward_amounts_weight << " > " << (max_reward_amounts_weight + dev_fee_weight) << ")");
-                return -2;
-        }
+	if (dry_run) {
+		if (reward_amounts_weight != max_reward_amounts_weight) {
+			LOGERR(1, "create_miner_tx: incorrect miner rewards during the dry run (" << reward_amounts_weight << " != " <<  max_reward_amounts_weight << ")");
+			return -1;
+		}
+	}
+	else if (reward_amounts_weight > max_reward_amounts_weight) {
+		LOGERR(1, "create_miner_tx: incorrect miner rewards during the real run (" << reward_amounts_weight << " > " << max_reward_amounts_weight << ")");
+		return -2;
+	}
 
 	// TX_EXTRA begin
 	m_minerTxExtra.clear();

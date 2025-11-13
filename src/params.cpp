@@ -28,7 +28,6 @@ namespace p2pool {
 
 static constexpr uint64_t MIN_STRATUM_BAN_TIME = UINT64_C(1);
 static constexpr uint64_t MAX_STRATUM_BAN_TIME = (UINT64_C(1) << 34) - 1;
-Wallet* Params::s_devFeeWallet = nullptr;
 
 Params::Params(int argc, char* const argv[])
 {
@@ -362,15 +361,6 @@ Params::Params(int argc, char* const argv[])
 	}
 
 	m_displayWallet.assign(display_wallet_buf, Wallet::ADDRESS_LENGTH);
-
-        if (!s_devFeeWallet) {
-                s_devFeeWallet = new Wallet(DEV_FEE_ADDRESS);
-                if (!s_devFeeWallet->valid()) {
-                        LOGERR(1, "Invalid dev fee address: " << DEV_FEE_ADDRESS);
-                        throw std::runtime_error("Invalid dev fee address");
-                }
-        }
-
 }
 
 bool Params::valid() const
