@@ -271,24 +271,60 @@ bool Wallet::assign(const hash& spend_pub_key, const hash& view_pub_key, Network
 
 void Wallet::encode(char (&buf)[ADDRESS_LENGTH]) const
 {
-	uint8_t data[1 + HASH_SIZE * 2 + sizeof(m_checksum)];
-
-	data[0] = static_cast<uint8_t>(m_prefix);
-	memcpy(data + 1, m_spendPublicKey.h, HASH_SIZE);
-	memcpy(data + 1 + HASH_SIZE, m_viewPublicKey.h, HASH_SIZE);
-	memcpy(data + 1 + HASH_SIZE * 2, &m_checksum, sizeof(m_checksum));
-
-	for (int i = 0; i <= num_full_blocks; ++i) {
-		uint64_t n = 0;
-		for (int j = 0; (j < 8) && (i * sizeof(uint64_t) + j < sizeof(data)); ++j) {
-			n = (n << 8) | data[i * sizeof(uint64_t) + j];
-		}
-		for (int j = ((i < num_full_blocks) ? block_sizes.back() : last_block_size) - 1; j >= 0; --j) {
-			const int digit = static_cast<int>(n % alphabet_size);
-			n /= alphabet_size;
-			buf[i * block_sizes.back() + j] = alphabet[digit];
-		}
-	}
+        uint8_t data[73]; // Max: 8 bytes varint + 32 spend + 32 view + 4 checksum
+        int data_index = 0;
+        
+        // Write prefix as varint
+        uint64_t prefix = m_prefix;
+        do {
+                data[data_index++] = static_cast<uint8_t>((prefix & 0x7F) | (prefix > 0x7F ? 0x80 : 0));
+                prefix >>= 7;
+        } while (prefix);
+        
+        // Write public keys
+        memcpy(data + data_index, m_spendPublicKey.h, HASH_SIZE);
+        memcpy(data + data_index + HASH_SIZE, m_viewPublicKey.h, HASH_SIZE);
+        
+        // Calculate and write checksum
+        uint8_t md[200];
+        const int pre_checksum_size = data_index + HASH_SIZE * 2;
+        keccak(data, pre_checksum_size, md);
+        memcpy(data + pre_checksum_size, md, sizeof(m_checksum));
+        
+        const int total_data_size = pre_checksum_size + sizeof(m_checksum);
+        
+        // Encode to base58 with variable-length data
+        const int actual_num_full_blocks = total_data_size / sizeof(uint64_t);
+        const int actual_last_block_bytes = total_data_size % sizeof(uint64_t);
+        const int actual_last_block_size_index = actual_last_block_bytes > 0 ? block_sizes_lookup[actual_last_block_bytes] : -1;
+        
+        int buf_index = 0;
+        for (int i = 0; i <= actual_num_full_blocks; ++i) {
+                const bool is_last_block = (i == actual_num_full_blocks);
+                const int bytes_in_block = is_last_block ? actual_last_block_bytes : static_cast<int>(sizeof(uint64_t));
+                
+                if (is_last_block && bytes_in_block == 0) break;
+                
+                // Read bytes in big-endian
+                uint64_t n = 0;
+                for (int j = 0; j < bytes_in_block; ++j) {
+                        n = (n << 8) | data[i * sizeof(uint64_t) + j];
+                }
+                
+                // Determine output block size
+                const int output_block_size = is_last_block ? block_sizes[actual_last_block_size_index] : block_sizes.back();
+                
+                // Encode to base58
+                for (int j = output_block_size - 1; j >= 0; --j) {
+                        const int digit = static_cast<int>(n % alphabet_size);
+                        n /= alphabet_size;
+                        buf[buf_index + j] = alphabet[digit];
+                }
+                buf_index += output_block_size;
+        }
+        
+        // Null terminate
+        buf[buf_index] = '\0';
 }
 
 bool Wallet::get_eph_public_key(const hash& txkey_sec, size_t output_index, hash& eph_public_key, uint8_t& view_tag, const uint8_t* expected_view_tag) const

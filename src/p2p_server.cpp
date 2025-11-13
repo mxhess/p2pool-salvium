@@ -3162,7 +3162,7 @@ bool P2PServer::P2PClient::on_monero_block_broadcast(const uint8_t* buf, uint32_
 
 	const uint64_t header_and_miner_tx_size = static_cast<uint64_t>(data.header_size) + data.miner_tx_size;
 
-	if ((data.header_size < 43) || (data.header_size > 128) || (data.miner_tx_size < 64) || (header_and_miner_tx_size >= size)) {
+        if ((data.header_size < 43) || (data.header_size > 128) || (data.miner_tx_size < 40) || (header_and_miner_tx_size >= size)) {
 		LOGWARN(3, "Invalid MONERO_BLOCK_BROADCAST header: " << data.header_size << ", " << data.miner_tx_size << ", " << size);
 		return false;
 	}
