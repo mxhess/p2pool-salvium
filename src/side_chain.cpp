@@ -1072,7 +1072,7 @@ void SideChain::print_status(bool obtain_sidechain_lock) const
 	}
 
 	LOGINFO(0, "status" <<
-		"\nMonero node               = " << m_pool->current_host().m_displayName <<
+		"\nSalvium node              = " << m_pool->current_host().m_displayName <<
 		"\nMain chain height         = " << m_pool->block_template().height() <<
 		"\nMain chain hashrate       = " << log::Hashrate(network_hashrate) <<
 		"\nSide chain ID             = " << (is_default() ? "default" : (is_mini() ? "mini" : (is_nano() ? "nano" : m_consensusIdDisplayStr.c_str()))) <<
