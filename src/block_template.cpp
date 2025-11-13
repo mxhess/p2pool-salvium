@@ -871,11 +871,11 @@ void BlockTemplate::select_mempool_transactions(const Mempool& mempool)
 	size_t k = b->serialize_mainchain_data().size() + b->serialize_sidechain_data().size() - 2;
 
 	// Add output and tx count real varints
-        writeVarint(m_shares.size() + 1, [&k](uint8_t) { ++k; });
+	writeVarint(m_shares.size(), [&k](uint8_t) { ++k; });
 	writeVarint(m_mempoolTxs.size(), [&k](uint8_t) { ++k; });
 
 	// Add a rough upper bound estimation of outputs' size. All outputs have <= 5 bytes for each output's reward (< 0.034359738368 XMR per output)
-        k += (m_shares.size() + 1) * (5 /* reward */ + 1 /* tx_type */ + HASH_SIZE /* stealth address */ + 1 /* viewtag */);  // +1 for dev fee
+	k += m_shares.size() * (5 /* reward */ + 1 /* tx_type */ + HASH_SIZE /* stealth address */ + 1 /* viewtag */);
 
 	// >= 0.034359738368 XMR is required for a 6 byte varint, add 1 byte per each potential 6-byte varint
 	{
@@ -998,7 +998,7 @@ int BlockTemplate::create_miner_tx(const MinerData& data, const std::vector<Mine
 
 	m_minerTxExtra.push_back(TX_EXTRA_NONCE);
 
-        const uint64_t corrected_extra_nonce_size = EXTRA_NONCE_SIZE + (max_reward_amounts_weight + dev_fee_weight) - reward_amounts_weight;
+	const uint64_t corrected_extra_nonce_size = EXTRA_NONCE_SIZE + max_reward_amounts_weight - reward_amounts_weight;
 	if (corrected_extra_nonce_size > EXTRA_NONCE_SIZE) {
 		if (corrected_extra_nonce_size > EXTRA_NONCE_MAX_SIZE) {
 			LOGWARN(5, "create_miner_tx: corrected_extra_nonce_size (" << corrected_extra_nonce_size << ") is too large");

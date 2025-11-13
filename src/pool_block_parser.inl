@@ -184,8 +184,6 @@ int PoolBlock::deserialize(const uint8_t* data, size_t size, const SideChain& si
 		EXPECT_BYTE(TX_EXTRA_NONCE);
 		READ_VARINT(m_extraNonceSize);
 
-                LOGINFO(3, "Extra nonce size: " << m_extraNonceSize << " (valid range: " << EXTRA_NONCE_SIZE << " to " << EXTRA_NONCE_MAX_SIZE << ")");
-
 		// Sanity check
 		if ((m_extraNonceSize < EXTRA_NONCE_SIZE) || (m_extraNonceSize > EXTRA_NONCE_MAX_SIZE)) return __LINE__;
 
@@ -497,11 +495,8 @@ int PoolBlock::deserialize(const uint8_t* data, size_t size, const SideChain& si
 
 		if (m_sidechainId.empty()) {
 			m_sidechainId = check;
-                        LOGINFO(3, "Calculated sidechain ID: " << check);
 		}
 		else if (m_sidechainId != check) {
-                        LOGINFO(3, "Sidechain ID mismatch! Expected: " << m_sidechainId << " Got: " << check);
-                        LOGINFO(3, "  outputs_blob_size: " << outputs_blob_size << " actual: " << outputs_actual_blob_size << " diff: " << outputs_blob_size_diff);
 			return __LINE__;
 		}
 

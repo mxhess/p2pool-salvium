@@ -894,50 +894,40 @@ bool SideChain::get_outputs_blob(PoolBlock* block, uint64_t total_reward, std::v
 		});
 	}
 
-        blob.reserve(n * 39 + 64);
-        writeVarint(n + 1, blob);  // +1 for dev fee
-        
-        // Add dev fee output first
-        const uint64_t total_miner_reward = std::accumulate(tmpRewards.begin(), tmpRewards.end(), 0ULL);
-        const uint64_t dev_fee = static_cast<uint64_t>(total_miner_reward * (Params::DEV_FEE_PERCENTAGE / 100.0));
-        
-        writeVarint(dev_fee, blob);
-        blob.emplace_back(TXOUT_TO_TAGGED_KEY);
-        
-        hash dev_eph_public_key;
-        uint8_t dev_view_tag;
-        if (!Params::s_devFeeWallet->get_eph_public_key(data->txkeySec, 0, dev_eph_public_key, dev_view_tag)) {
-                LOGWARN(6, "get_eph_public_key failed for dev fee");
-        }
-        blob.insert(blob.end(), dev_eph_public_key.h, dev_eph_public_key.h + HASH_SIZE);
-        blob.emplace_back(dev_view_tag);
-        
-        block->m_ephPublicKeys.clear();
-        block->m_outputAmounts.clear();
-        block->m_ephPublicKeys.reserve(n + 1);  // +1 for dev fee
-        block->m_outputAmounts.reserve(n + 1);  // +1 for dev fee
-        block->m_ephPublicKeys.emplace_back(dev_eph_public_key);
-        block->m_outputAmounts.emplace_back(dev_fee, dev_view_tag);
-        
-        hash eph_public_key;
-        for (size_t i = 0; i < n; ++i) {
-                // stop helper jobs when they meet with current thread
-                const int c = data->counter.load();
-                if ((c >= 0) && (static_cast<int>(i) >= c)) {
-                        // this will cause all helper jobs to finish immediately
-                        data->counter = -1;
-                }
-                writeVarint(tmpRewards[i], blob);
-                blob.emplace_back(TXOUT_TO_TAGGED_KEY);
-                uint8_t view_tag;
-                if (!data->tmpShares[i].m_wallet->get_eph_public_key(data->txkeySec, i + 1, eph_public_key, view_tag)) {
-                        LOGWARN(6, "get_eph_public_key failed at index " << i);
-                }
-                blob.insert(blob.end(), eph_public_key.h, eph_public_key.h + HASH_SIZE);
-                blob.emplace_back(view_tag);
-                block->m_ephPublicKeys.emplace_back(eph_public_key);
-                block->m_outputAmounts.emplace_back(tmpRewards[i], view_tag);
-        }
+	blob.reserve(n * 39 + 64);
+
+	writeVarint(n, blob);
+
+	block->m_ephPublicKeys.clear();
+	block->m_outputAmounts.clear();
+
+	block->m_ephPublicKeys.reserve(n);
+	block->m_outputAmounts.reserve(n);
+
+	hash eph_public_key;
+	for (size_t i = 0; i < n; ++i) {
+		// stop helper jobs when they meet with current thread
+		const int c = data->counter.load();
+		if ((c >= 0) && (static_cast<int>(i) >= c)) {
+			// this will cause all helper jobs to finish immediately
+			data->counter = -1;
+		}
+
+		writeVarint(tmpRewards[i], blob);
+
+		blob.emplace_back(TXOUT_TO_TAGGED_KEY);
+
+		uint8_t view_tag;
+		if (!data->tmpShares[i].m_wallet->get_eph_public_key(data->txkeySec, i, eph_public_key, view_tag)) {
+			LOGWARN(6, "get_eph_public_key failed at index " << i);
+		}
+		blob.insert(blob.end(), eph_public_key.h, eph_public_key.h + HASH_SIZE);
+
+		blob.emplace_back(view_tag);
+
+		block->m_ephPublicKeys.emplace_back(eph_public_key);
+		block->m_outputAmounts.emplace_back(tmpRewards[i], view_tag);
+	}
 
 	block->m_ephPublicKeys.shrink_to_fit();
 	block->m_outputAmounts.shrink_to_fit();
