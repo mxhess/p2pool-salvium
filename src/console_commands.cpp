@@ -165,7 +165,7 @@ typedef struct cmd {
 	cmdfunc *func;
 } cmd;
 
-static cmdfunc do_help, do_status, do_loglevel, do_addpeers, do_droppeers, do_showpeers, do_showworkers, do_showbans, do_showhosts, do_nexthost, do_outpeers, do_inpeers, do_exit, do_version;
+static cmdfunc do_help, do_status, do_loglevel, do_addpeers, do_droppeers, do_showpeers, do_showworkers, do_showbans, do_showhosts, do_nexthost, do_outpeers, do_inpeers, do_donatetime, do_exit, do_version;
 
 #ifdef WITH_RANDOMX
 static cmdfunc do_start_mining, do_stop_mining;
@@ -188,6 +188,7 @@ static cmd cmds[] = {
 	{ STRCONST("start_mining"), "<threads>", "start mining", do_start_mining },
 	{ STRCONST("stop_mining"), "", "stop mining", do_stop_mining },
 #endif
+        { STRCONST("donate_time"), "<N>", "set donation time (1-50 minutes per 100)", do_donatetime },
 	{ STRCONST("exit"), "", "terminate p2pool", do_exit },
 	{ STRCONST("version"), "", "show p2pool version", do_version },
 	{ STRCNULL, NULL, NULL, NULL }
@@ -227,6 +228,8 @@ static void do_status(p2pool *m_pool, const char * /* args */)
 #ifdef WITH_INDEXED_HASHES
 	indexed_hash::print_status();
 #endif
+
+	LOGINFO(0, "Dev donation: " << log::LightCyan() << m_pool->params().m_donateLevel << log::NoColor() << " minute(s) per 100 minute cycle");
 
 	bkg_jobs_tracker->print_status();
 
@@ -374,6 +377,20 @@ static void do_inpeers(p2pool* m_pool, const char* args)
 		m_pool->p2p_server()->set_max_incoming_peers(strtoul(args, nullptr, 10));
 		LOGINFO(0, "max incoming peers set to " << m_pool->p2p_server()->max_incoming_peers());
 	}
+}
+
+static void do_donatetime(p2pool* m_pool, const char* args)
+{
+	uint32_t minutes = strtoul(args, nullptr, 10);
+	if (minutes < 1 || minutes > 50) {
+		LOGERR(0, "Invalid donation time " << minutes << ", must be 1-50");
+		return;
+	}
+	
+	// Cast away const - params are mutable at runtime for console commands
+	const_cast<Params&>(m_pool->params()).m_donateLevel = minutes;
+	
+	LOGINFO(0, log::LightCyan() << "Dev donation time updated to " << log::LightGreen() << minutes << log::LightCyan() << " minute(s) per 100 minute cycle");
 }
 
 #ifdef WITH_RANDOMX
