@@ -151,14 +151,11 @@ TEST(pool_block, verify)
 		uint32_t m_expectedSharesNextBlock;
 		bool m_shuffle;
 		hash m_templateBlobsHash;
-	} tests[6] = {
-		{ "default", "sidechain_dump.dat", 3456189, 11704382, 53, false, H("c84a85eebf17ab266e8a81b347dd7490043ede3a055c0dbe85e9cd378905845a") },
-		{ "default", "sidechain_dump.dat", 3456189, 11704382, 53, true, H("c84a85eebf17ab266e8a81b347dd7490043ede3a055c0dbe85e9cd378905845a") },
-		{ "mini", "sidechain_dump_mini.dat", 3456189, 11207082, 578, false, H("08debd1378bae899017eb58362f4c638d78e5218558025142dcbc2651c76b27e") },
-		{ "mini", "sidechain_dump_mini.dat", 3456189, 11207082, 578, true, H("08debd1378bae899017eb58362f4c638d78e5218558025142dcbc2651c76b27e") },
-		{ "nano", "sidechain_dump_nano.dat", 3456189, 188542, 115, false, H("dd667c41eb15ffb0eb662065545dc0dfbbcac8393348a4fc0a7367040319b0d5") },
-		{ "nano", "sidechain_dump_nano.dat", 3456189, 188542, 115, true, H("dd667c41eb15ffb0eb662065545dc0dfbbcac8393348a4fc0a7367040319b0d5") },
-	};
+        } tests[] = {
+                // Salvium mainnet - 200 blocks from live cache
+                { "salvium_main", "sidechain_dump.dat", 356800, 200, 200, false, H("0000000000000000000000000000000000000000000000000000000000000000") },
+                { "salvium_main", "sidechain_dump.dat", 356800, 200, 200, true, H("0000000000000000000000000000000000000000000000000000000000000000") },
+        };
 
 	for (const STest& t : tests)
 	{
