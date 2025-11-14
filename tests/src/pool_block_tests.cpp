@@ -152,17 +152,17 @@ TEST(pool_block, verify)
 		bool m_shuffle;
 		hash m_templateBlobsHash;
         } tests[] = {
-                // Salvium mainnet - 200 blocks from live cache
-                { "salvium_main", "sidechain_dump.dat", 356800, 200, 200, false, H("0000000000000000000000000000000000000000000000000000000000000000") },
-                { "salvium_main", "sidechain_dump.dat", 356800, 200, 200, true, H("0000000000000000000000000000000000000000000000000000000000000000") },
+                // Salvium mainnet - full cache (4608 blocks at sidechain height 11536)
+                { "salvium_main", "sidechain_dump.dat", 357365, 11536, 3, false, H("5634d8403f91c81ff792504419b63c617efb372aff6144ab9e025501df45c821") },
+                { "salvium_main", "sidechain_dump.dat", 357365, 11536, 3, true, H("5634d8403f91c81ff792504419b63c617efb372aff6144ab9e025501df45c821") },
         };
 
 	for (const STest& t : tests)
 	{
 		SideChain sidechain(nullptr, NetworkType::Mainnet, t.m_poolName);
 
-		// Difficulty of block 3454976
-		sidechain.m_testMainChainDiff = difficulty_type(625461936742ULL, 0ULL);
+		// Difficulty at Salvium height ~357000
+                sidechain.m_testMainChainDiff = difficulty_type(12964350330ULL, 0ULL);
 
 		std::ifstream f(t.m_fileName, std::ios::binary | std::ios::ate);
 		ASSERT_EQ(f.good() && f.is_open(), true);
@@ -221,13 +221,14 @@ TEST(pool_block, verify)
 			auto& r = tpl.rng();
 			r.seed(0);
 
-			MinerData data;
-			data.major_version = 16;
-			data.height = t.m_txinGenHeight;
-			data.prev_id = H("f7723462d2f4d9f605601df8de8bd483802d2275f77cbf3a6f61d8f3fc4c47bc");
-			data.seed_hash = H("11186f5a8473d8dc7a0d3a0bf25834a07b1dffe8741d53cd543a8708c2e8b2a9");
-			data.difficulty = { 656711234691ULL, 0 };
-			data.median_weight = 300000;
+                        MinerData data;
+                        data.major_version = 10;  // Salvium Carrot v1
+                        data.height = t.m_txinGenHeight;
+                        data.prev_id = tip->m_sidechainId;  // Use actual tip block ID
+                        data.seed_hash = H("65d2f44f763238aa3363add8f638f78dc811e084ce8b244916ab7589650b760b");  // Current Salvium seed
+                        data.difficulty = { 12964350330ULL, 0 };  // Current Salvium difficulty
+                        data.median_weight = 300000;
+
 			data.already_generated_coins = std::numeric_limits<uint64_t>::max();
 			data.median_timestamp = (1ULL << 35) - 2;
 
@@ -246,8 +247,8 @@ TEST(pool_block, verify)
 
 			Params params;
 
-			params.m_miningWallet = Wallet("44MnN1f3Eto8DZYUWuE5XZNUtE3vcRzt2j6PzqWpPau34e6Cf4fAxt6X2MBmrm6F9YMEiMNjN6W4Shn4pLcfNAja621jwyg");
-			params.m_subaddress = Wallet("86eQxzSW4AZfvsWRSop755WZUsog6L3x32NRZukeeShnS4mBGVpcqQhS6pCNxj44usPKNwesZ45ooHyjDku6nVZdT3Q9qrz");
+			params.m_miningWallet = Wallet("SC11n4s2UEj9Rc8XxppPbegwQethVmREpG9JP3aJUBGRCuD3wEvS4qtYtBjhqSx3S1hw3WDCfmbWKHJqa9g5Vqyo3jrsReJ5vp");
+			params.m_subaddress = Wallet("SC1siDDg9o3hBrSHJPBaGPXmJvPcUku8nD84cCT2PNUn61PxtdtBynHBiCaUf7BbNJctmU8LKabiHNE8x5ReYg6RYEhSqRFcL2W");
 
 			tpl.update(data, mempool, &params);
 
@@ -266,7 +267,7 @@ TEST(pool_block, verify)
 		}
 
 		PoolBlock block;
-		ASSERT_TRUE(block.m_minerWallet.decode("44MnN1f3Eto8DZYUWuE5XZNUtE3vcRzt2j6PzqWpPau34e6Cf4fAxt6X2MBmrm6F9YMEiMNjN6W4Shn4pLcfNAja621jwyg"));
+		ASSERT_TRUE(block.m_minerWallet.decode("SC11n4s2UEj9Rc8XxppPbegwQethVmREpG9JP3aJUBGRCuD3wEvS4qtYtBjhqSx3S1hw3WDCfmbWKHJqa9g5Vqyo3jrsReJ5vp"));
 
 		std::vector<MinerShare> shares;
 

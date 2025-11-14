@@ -1,3 +1,7 @@
 .vscode
 build
 logs
+tests/extract_cache
+tests/extract_chain
+tests/inspect_dump
+
