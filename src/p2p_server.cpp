@@ -3190,32 +3190,35 @@ bool P2PServer::P2PClient::on_monero_block_broadcast(const uint8_t* buf, uint32_
 	}
 
         uint64_t unlock_height;
-	const uint8_t* p = buf + data.header_size + 1;
-	if (!readVarint(p, buf + header_and_miner_tx_size, unlock_height)) {
-		LOGWARN(3, "Invalid MONERO_BLOCK_BROADCAST: unlock_height not found");
-		return false;
-	}
-	
-	// Parse actual height from txin_gen (Salvium uses literal 60 for unlock_time)
-	uint64_t num_inputs;
-	if (!readVarint(p, buf + header_and_miner_tx_size, num_inputs) || (num_inputs != 1)) {
-		LOGWARN(3, "Invalid MONERO_BLOCK_BROADCAST: num_inputs invalid");
-		return false;
-	}
-	
-	// Check input type (should be 0xff for txin_gen)
-	if ((p >= buf + header_and_miner_tx_size) || (*p != 0xff)) {
-		LOGWARN(3, "Invalid MONERO_BLOCK_BROADCAST: txin_gen not found");
-		return false;
-	}
-	++p;
-	
-	uint64_t height;
-	if (!readVarint(p, buf + header_and_miner_tx_size, height)) {
-		LOGWARN(3, "Invalid MONERO_BLOCK_BROADCAST: height not found in txin_gen");
-		return false;
-	}
-	
+        const uint8_t* p = buf + data.header_size + 1;
+        p = readVarint(p, buf + header_and_miner_tx_size, unlock_height);  // Capture return value!
+        if (!p) {
+        	LOGWARN(3, "Invalid MONERO_BLOCK_BROADCAST: unlock_height not found");
+        	return false;
+        }
+
+        // Parse actual height from txin_gen (Salvium uses literal 60 for unlock_time)
+        uint64_t num_inputs;
+        p = readVarint(p, buf + header_and_miner_tx_size, num_inputs);  // Capture return value!
+        if (!p || (num_inputs != 1)) {
+        	LOGWARN(3, "Invalid MONERO_BLOCK_BROADCAST: num_inputs invalid");
+        	return false;
+        }
+
+        // Check input type (should be 0xff for txin_gen)
+        if ((p >= buf + header_and_miner_tx_size) || (*p != 0xff)) {
+        	LOGWARN(3, "Invalid MONERO_BLOCK_BROADCAST: txin_gen not found");
+        	return false;
+        }
+        ++p;
+
+        uint64_t height;
+        p = readVarint(p, buf + header_and_miner_tx_size, height);  // Capture return value!
+        if (!p) {
+        	LOGWARN(3, "Invalid MONERO_BLOCK_BROADCAST: height not found in txin_gen");
+        	return false;
+        }
+
 	p2pool* pool = server->m_pool;
 
 	// Ignore blocks which already unlocked
