@@ -75,7 +75,10 @@ int PoolBlock::deserialize(const uint8_t* data, size_t size, const SideChain& si
 		const int nonce_offset = static_cast<int>(data - data_begin);
 		READ_BUF(&m_nonce, NONCE_SIZE);
 
-		EXPECT_BYTE(TX_VERSION);
+                // Accept both old (4) and new (60) TX_VERSION during transition
+                uint8_t tx_version;
+                READ_BYTE(tx_version);
+                if (tx_version != 4 && tx_version != TX_VERSION) return __LINE__;
 
 		uint64_t unlock_height;
 		READ_VARINT(unlock_height);
