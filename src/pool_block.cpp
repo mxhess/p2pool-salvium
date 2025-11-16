@@ -228,31 +228,6 @@ std::vector<uint8_t> PoolBlock::serialize_mainchain_data(size_t* header_size, si
 		*miner_tx_size = data.size() - header_size0;
 	}
 
-        // Protocol tx (required for Salvium)
-        if (m_majorVersion >= 10) {
-                data.push_back(4);  // version = TRANSACTION_VERSION_CARROT
-                writeVarint(60, data);  // unlock_time = 60
-                
-                // vin (1 txin_gen)
-                data.push_back(1);  // vin.size() = 1
-                data.push_back(TXIN_GEN);
-                writeVarint(m_txinGenHeight, data);
-                
-                // vout (empty)
-                data.push_back(0);  // vout.size() = 0
-                
-                // extra (2 bytes: 0x02 0x00)
-                data.push_back(2);  // extra.size() = 2
-                data.push_back(0x02);
-                data.push_back(0x00);
-                
-                // type = PROTOCOL
-                writeVarint(2, data);  // transaction_type::PROTOCOL = 2
-                
-                // rct_signatures (null)
-                data.push_back(0);  // RCTTypeNull
-        }
-
 	writeVarint(m_transactions.size() - 1, data);
 
 #ifdef WITH_INDEXED_HASHES

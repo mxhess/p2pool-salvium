@@ -219,9 +219,74 @@ int PoolBlock::deserialize(const uint8_t* data, size_t size, const SideChain& si
 		if (static_cast<uint64_t>(data - tx_extra_begin) != tx_extra_size) return __LINE__;
 
 		EXPECT_BYTE(0);
-
-		uint64_t num_transactions;
-		READ_VARINT(num_transactions);
+                
+                // Protocol TX (Salvium Carrot v1+) - parse if present
+                if (m_majorVersion >= 10) {
+                        // Save position in case we need to backtrack
+                        const uint8_t* saved_pos = data;
+                        
+                        uint64_t next_val;
+                        const uint8_t* peek = readVarint(data, data_end, next_val);
+                        
+                        // Check if this looks like protocol_tx (version 4) or num_transactions
+                        // num_transactions is typically 0-100, protocol version is 4
+                        if (peek && next_val == 4) {
+                                // Likely protocol_tx, try to parse it
+                                data = peek;  // Consume the version varint
+                                
+                                uint64_t protocol_unlock_time;
+                                data = readVarint(data, data_end, protocol_unlock_time);
+                                if (!data) { data = saved_pos; goto skip_protocol_tx; }
+                                
+                                uint64_t protocol_vin_size;
+                                data = readVarint(data, data_end, protocol_vin_size);
+                                if (!data || protocol_vin_size != 1) { data = saved_pos; goto skip_protocol_tx; }
+                                
+                                uint8_t txin_type;
+                                READ_BYTE(txin_type);
+                                if (txin_type != TXIN_GEN) { data = saved_pos; goto skip_protocol_tx; }
+                                
+                                uint64_t protocol_height;
+                                data = readVarint(data, data_end, protocol_height);
+                                if (!data) { data = saved_pos; goto skip_protocol_tx; }
+                                
+                                uint64_t protocol_vout_size;
+                                data = readVarint(data, data_end, protocol_vout_size);
+                                if (!data) { data = saved_pos; goto skip_protocol_tx; }
+                                
+                                // Skip vout if any
+                                for (uint64_t i = 0; i < protocol_vout_size; ++i) {
+                                        uint64_t amount;
+                                        data = readVarint(data, data_end, amount);
+                                        if (!data) { data = saved_pos; goto skip_protocol_tx; }
+                                        uint8_t type;
+                                        READ_BYTE(type);
+                                        // Skip output data based on type
+                                        if (!read_buf(nullptr, 32)) { data = saved_pos; goto skip_protocol_tx; }
+                                }
+                                
+                                uint64_t protocol_extra_size;
+                                data = readVarint(data, data_end, protocol_extra_size);
+                                if (!data) { data = saved_pos; goto skip_protocol_tx; }
+                                
+                                for (uint64_t i = 0; i < protocol_extra_size; ++i) {
+                                        uint8_t tmp;
+                                        READ_BYTE(tmp);
+                                }
+                                
+                                uint64_t protocol_type;
+                                data = readVarint(data, data_end, protocol_type);
+                                if (!data) { data = saved_pos; goto skip_protocol_tx; }
+                                
+                                uint8_t rct;
+                                READ_BYTE(rct);
+                                if (rct != 0) { data = saved_pos; goto skip_protocol_tx; }
+                        }
+                }
+                
+skip_protocol_tx:
+                uint64_t num_transactions;
+                READ_VARINT(num_transactions);
 
 		const int transactions_offset = static_cast<int>(data - data_begin);
 

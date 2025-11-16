@@ -596,6 +596,32 @@ void BlockTemplate::update(const MinerData& data, const Mempool& mempool, const 
 	m_minerTxOffsetInTemplate = m_blockHeader.size();
 	m_minerTxSize = m_minerTx.size();
 	m_blockTemplateBlob.insert(m_blockTemplateBlob.end(), m_minerTx.begin(), m_minerTx.end());
+        
+        // Add protocol_tx for Salvium Carrot v1+
+        if (data.major_version >= 10) {
+                writeVarint(4, m_blockTemplateBlob);  // version = TRANSACTION_VERSION_CARROT
+                writeVarint(60, m_blockTemplateBlob);  // unlock_time = 60
+                
+                // vin (1 txin_gen)
+                writeVarint(1, m_blockTemplateBlob);  // vin.size() = 1
+                m_blockTemplateBlob.push_back(TXIN_GEN);
+                writeVarint(data.height, m_blockTemplateBlob);
+                
+                // vout (empty)
+                writeVarint(0, m_blockTemplateBlob);  // vout.size() = 0
+                
+                // extra (2 bytes: 0x02 0x00)
+                writeVarint(2, m_blockTemplateBlob);  // extra.size() = 2
+                m_blockTemplateBlob.push_back(0x02);
+                m_blockTemplateBlob.push_back(0x00);
+                
+                // type = PROTOCOL
+                writeVarint(2, m_blockTemplateBlob);  // transaction_type::PROTOCOL = 2
+                
+                // rct_signatures (null)
+                m_blockTemplateBlob.push_back(0);  // RCTTypeNull
+        }
+        
 	writeVarint(m_numTransactionHashes, m_blockTemplateBlob);
 
 	// Miner tx hash is skipped here because it's not a part of block template
