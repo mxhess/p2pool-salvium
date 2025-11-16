@@ -938,7 +938,7 @@ int BlockTemplate::create_miner_tx(const MinerData& data, const std::vector<Mine
 	m_minerTx.push_back(TX_VERSION);
 
 	// Unlock time
-	writeVarint(data.height + MINER_REWARD_UNLOCK_TIME, m_minerTx);
+	writeVarint(MINER_REWARD_UNLOCK_TIME, m_minerTx);
 
 	// Number of inputs
 	m_minerTx.push_back(1);

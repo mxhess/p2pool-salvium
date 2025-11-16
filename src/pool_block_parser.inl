@@ -88,7 +88,7 @@ int PoolBlock::deserialize(const uint8_t* data, size_t size, const SideChain& si
 
                 READ_VARINT(m_txinGenHeight);
                 if (m_majorVersion != sidechain.network_major_version(m_txinGenHeight)) return __LINE__;
-                if (unlock_height != m_txinGenHeight + MINER_REWARD_UNLOCK_TIME) return __LINE__;
+                if (unlock_height != MINER_REWARD_UNLOCK_TIME) return __LINE__;
 
                 std::vector<uint8_t> outputs_blob;
                 const int outputs_offset = static_cast<int>(data - data_begin);

@@ -336,7 +336,7 @@ static std::vector<uint8_t> construct_monero_block_blob(rapidjson::Value* value,
 	blob.push_back(1);
 	blob.push_back(TXIN_GEN);
 
-	writeVarint(unlock_height - MINER_REWARD_UNLOCK_TIME, blob);
+	writeVarint(MINER_REWARD_UNLOCK_TIME, blob);
 
 	auto arr = outputs->value.GetArray();
 

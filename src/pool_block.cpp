@@ -160,7 +160,7 @@ std::vector<uint8_t> PoolBlock::serialize_mainchain_data(size_t* header_size, si
 
 	// Miner tx
 	data.push_back(TX_VERSION);
-	writeVarint(m_txinGenHeight + MINER_REWARD_UNLOCK_TIME, data);
+	writeVarint(MINER_REWARD_UNLOCK_TIME, data);
 	data.push_back(1);
 	data.push_back(TXIN_GEN);
 	writeVarint(m_txinGenHeight, data);
