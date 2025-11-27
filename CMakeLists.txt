@@ -97,6 +97,9 @@ if (DEV_DEBUG)
 	add_definitions(-DDEV_DEBUG)
 endif()
 
+add_subdirectory(external/src/mx25519)
+set(LIBS ${LIBS} mx25519)
+
 include(cmake/flags.cmake)
 
 set(HEADERS
@@ -105,6 +108,7 @@ set(HEADERS
 	external/src/hardforks/hardforks.h
 	src/block_cache.h
 	src/block_template.h
+        src/carrot_crypto.h
 	src/common.h
 	src/console_commands.h
 	src/crypto.h
@@ -123,6 +127,7 @@ set(HEADERS
 	src/pool_block.h
 	src/pool_block_parser.inl
 	src/pow_hash.h
+        src/protocol_tx_hash.h
 	src/side_chain.h
 	src/stratum_server.h
 	src/tcp_server.h
@@ -140,6 +145,7 @@ set(SOURCES
 	external/src/hardforks/hardforks.cpp
 	src/block_cache.cpp
 	src/block_template.cpp
+        src/carrot_crypto.cpp
 	src/console_commands.cpp
 	src/crypto.cpp
 	src/json_rpc_request.cpp
@@ -157,6 +163,7 @@ set(SOURCES
 	src/params.cpp
 	src/pool_block.cpp
 	src/pow_hash.cpp
+        src/protocol_tx_hash.cpp
 	src/side_chain.cpp
 	src/stratum_server.cpp
 	src/tcp_server.cpp
@@ -234,6 +241,7 @@ include_directories(src)
 include_directories(external/src)
 include_directories(external/src/crypto)
 include_directories(external/src/cryptonote)
+include_directories(external/src/mx25519)
 include_directories(${UV_INCLUDE_DIR})
 include_directories(external/src/cppzmq)
 include_directories(${ZMQ_INCLUDE_DIR})

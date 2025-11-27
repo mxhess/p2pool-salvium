@@ -124,9 +124,10 @@ constexpr uint8_t EXTRA_NONCE_SIZE = 4;
 constexpr uint8_t EXTRA_NONCE_MAX_SIZE = EXTRA_NONCE_SIZE + 10;
 constexpr uint8_t TX_VERSION = 4;
 constexpr uint8_t TXIN_GEN = 0xFF;
-constexpr uint8_t TXOUT_TO_TAGGED_KEY = 3;
+constexpr uint8_t TXOUT_TO_TAGGED_KEY = 4;  // Changed from 3 to 4 for Carrot v1
 constexpr uint8_t TXOUT_TO_CARROT_V1 = 4;
 constexpr uint8_t TX_EXTRA_TAG_PUBKEY = 1;
+constexpr uint8_t TX_EXTRA_TAG_ADDITIONAL_PUBKEYS = 4;
 constexpr uint8_t TX_EXTRA_NONCE = 2;
 constexpr uint8_t TX_EXTRA_MERGE_MINING_TAG = 3;
 
@@ -552,7 +553,7 @@ struct MinerData
 
 	std::vector<AuxChainData> aux_chains;
 	uint32_t aux_nonce;
-
+        std::vector<uint8_t> protocol_tx_identifier;
 	std::chrono::high_resolution_clock::time_point time_received;
 };
 

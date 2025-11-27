@@ -193,6 +193,8 @@ private:
 
 	void get_miner_data(bool retry = true);
 	void parse_get_miner_data_rpc(const char* data, size_t size);
+        void fetch_block_template(MinerData& data);
+        void parse_block_template_rpc(const char* data, size_t size, MinerData& miner_data);
 
 	bool parse_block_header(const char* data, size_t size, ChainMain& c);
 	uint32_t parse_block_headers_range(const char* data, size_t size);

@@ -21,12 +21,14 @@
 #include "common.h"
 #include "block_template.h"
 #include "wallet.h"
+#include "carrot_crypto.h"
 #include "crypto.h"
 #include "keccak.h"
 #include "mempool.h"
 #include "p2pool.h"
 #include "side_chain.h"
 #include "pool_block.h"
+#include "protocol_tx_hash.h"
 #include "merkle.h"
 #include <zmq.hpp>
 #include <ctime>
@@ -242,6 +244,7 @@ void BlockTemplate::update(const MinerData& data, const Mempool& mempool, const 
 	};
 
 	m_height = data.height;
+        m_majorVersion = data.major_version;
 	m_difficulty = data.difficulty;
 	m_seedHash = data.seed_hash;
 
@@ -355,8 +358,11 @@ void BlockTemplate::update(const MinerData& data, const Mempool& mempool, const 
 
 	uint64_t base_reward = get_base_reward(data.already_generated_coins);
 
+        // Save the FULL reward before the split
+        uint64_t full_block_reward = base_reward;  // ADD THIS LINE
+
         // Salvium: 20% goes to staking, miners get 80%
-        base_reward = (base_reward * 4) / 5;  // 80% of total reward
+        base_reward = base_reward - (base_reward / 5);  // 80% of total reward
 
 	uint64_t total_tx_fees = 0;
 	uint64_t total_tx_weight = 0;
@@ -387,7 +393,7 @@ void BlockTemplate::update(const MinerData& data, const Mempool& mempool, const 
 	};
 	uint64_t max_reward_amounts_weight = get_reward_amounts_weight();
 
-	if (create_miner_tx(data, m_shares, max_reward_amounts_weight, true) < 0) {
+	if (create_miner_tx(data, m_shares, max_reward_amounts_weight, true, full_block_reward) < 0) {
 		use_old_template();
 		return;
 	}
@@ -540,14 +546,16 @@ void BlockTemplate::update(const MinerData& data, const Mempool& mempool, const 
 #endif
 	}
 
+        // Salvium: 1/5 of block reward is burnt, only 4/5 goes to miners
 	if (!SideChain::split_reward(final_reward, m_shares, m_rewards)) {
 		use_old_template();
 		return;
 	}
 
 	m_finalReward = final_reward;
+        m_fullBlockReward = full_block_reward;
 
-	const int create_miner_tx_result = create_miner_tx(data, m_shares, max_reward_amounts_weight, false);
+	const int create_miner_tx_result = create_miner_tx(data, m_shares, max_reward_amounts_weight, false, full_block_reward);
 	if (create_miner_tx_result < 0) {
 		if (create_miner_tx_result == -3) {
 			// Too many extra bytes were added, refine max_reward_amounts_weight and miner_tx_weight
@@ -567,7 +575,7 @@ void BlockTemplate::update(const MinerData& data, const Mempool& mempool, const 
 
 			max_reward_amounts_weight = get_reward_amounts_weight();
 
-			if (create_miner_tx(data, m_shares, max_reward_amounts_weight, true) < 0) {
+			if (create_miner_tx(data, m_shares, max_reward_amounts_weight, true, full_block_reward) < 0) {
 				use_old_template();
 				return;
 			}
@@ -583,7 +591,7 @@ void BlockTemplate::update(const MinerData& data, const Mempool& mempool, const 
 				return;
 			}
 
-			if (create_miner_tx(data, m_shares, max_reward_amounts_weight, false) < 0) {
+			if (create_miner_tx(data, m_shares, max_reward_amounts_weight, false, full_block_reward) < 0) {
 				use_old_template();
 				return;
 			}
@@ -602,47 +610,71 @@ void BlockTemplate::update(const MinerData& data, const Mempool& mempool, const 
 		return;
 	}
 
-	m_blockTemplateBlob = m_blockHeader;
-	m_extraNonceOffsetInTemplate += m_blockHeader.size();
-	m_minerTxOffsetInTemplate = m_blockHeader.size();
-	m_minerTxSize = m_minerTx.size();
-	m_blockTemplateBlob.insert(m_blockTemplateBlob.end(), m_minerTx.begin(), m_minerTx.end());
-        
-        // Add protocol_tx for Salvium Carrot v1+
-        if (data.major_version >= 10) {
-                writeVarint(4, m_blockTemplateBlob);  // version = TRANSACTION_VERSION_CARROT
-                writeVarint(60, m_blockTemplateBlob);  // unlock_time = 60
-                
-                // vin (1 txin_gen)
-                writeVarint(1, m_blockTemplateBlob);  // vin.size() = 1
-                m_blockTemplateBlob.push_back(TXIN_GEN);
-                writeVarint(data.height, m_blockTemplateBlob);
-                
-                // vout (empty)
-                writeVarint(0, m_blockTemplateBlob);  // vout.size() = 0
-                
-                // extra (2 bytes: 0x02 0x00)
-                writeVarint(2, m_blockTemplateBlob);  // extra.size() = 2
-                m_blockTemplateBlob.push_back(0x02);
-                m_blockTemplateBlob.push_back(0x00);
-                
-                // type = PROTOCOL
-                writeVarint(2, m_blockTemplateBlob);  // transaction_type::PROTOCOL = 2
-                
-                // rct_signatures (null)
-                m_blockTemplateBlob.push_back(0);  // RCTTypeNull
+        m_blockTemplateBlob = m_blockHeader;
+        if (m_extraNonceOffsetInTemplate > 0) {
+                m_extraNonceOffsetInTemplate += m_blockHeader.size();
         }
+        m_minerTxOffsetInTemplate = m_blockHeader.size();
+        m_minerTxSize = m_minerTx.size();
+        m_blockTemplateBlob.insert(m_blockTemplateBlob.end(), m_minerTx.begin(), m_minerTx.end());
+
+        // DEBUG: Show ALL of m_minerTx
+        LOGINFO(6, "DEBUG: FULL m_minerTx (" << m_minerTx.size() << " bytes):");
+        std::string full_tx_hex;
+        full_tx_hex.reserve(m_minerTx.size() * 2);
+        for (size_t i = 0; i < m_minerTx.size(); ++i) {
+            char buf[3];
+            snprintf(buf, sizeof(buf), "%02x", m_minerTx[i]);
+            full_tx_hex.append(buf);
+        }
+        LOGINFO(6, full_tx_hex);
+
+        LOGINFO(6, "DEBUG: major_version = " << data.major_version << ", checking if >= 10");
+        // Protocol tx for Salvium Carrot v1+
+
+        // First, calculate and store the miner TX hash
+        hash miner_tx_hash = calc_miner_tx_hash(0);
+            
+        // Clear and rebuild m_transactionHashes with both hashes
+        m_transactionHashes.clear();
+        m_transactionHashes.reserve(HASH_SIZE * 2);
+        m_transactionHashes.insert(m_transactionHashes.end(), miner_tx_hash.h, miner_tx_hash.h + HASH_SIZE);
+            
+        LOGINFO(3, "Stored miner TX hash at position 0: " << miner_tx_hash);
+            
+        // Write protocol tx bytes to blob
+        writeVarint(4, m_blockTemplateBlob);           // version
+        writeVarint(60, m_blockTemplateBlob);          // unlock_time
+        writeVarint(1, m_blockTemplateBlob);           // vin count
+        m_blockTemplateBlob.push_back(0xff);           // TXIN_GEN
+        writeVarint(data.height, m_blockTemplateBlob); // height
+        writeVarint(0, m_blockTemplateBlob);           // vout count
+        writeVarint(2, m_blockTemplateBlob);           // extra size
+        m_blockTemplateBlob.push_back(0x02);           // extra[0]
+        m_blockTemplateBlob.push_back(0x00);           // extra[1]
+        writeVarint(2, m_blockTemplateBlob);           // type PROTOCOL
+        m_blockTemplateBlob.push_back(0);              // RCT type
+
+        // Calculate protocol tx hash and store in member variable
+        calculate_protocol_tx_hash(data.height, m_protocolTxHash);
+        LOGINFO(3, "Protocol TX hash: " << m_protocolTxHash);
+
+        // Add to transaction list after miner tx
+        m_transactionHashes.insert(m_transactionHashes.end(), m_protocolTxHash.h, m_protocolTxHash.h + HASH_SIZE);
+
+        // Now write tx_hashes section
+        // For HF10+, blob tx_count excludes protocol tx (it's implicit like miner tx)
+        const uint64_t blob_tx_count = (data.major_version >= 10) ? (m_numTransactionHashes >= 2 ? m_numTransactionHashes - 2 : 0) : m_numTransactionHashes;
+        writeVarint(blob_tx_count, m_blockTemplateBlob);
         
-	writeVarint(m_numTransactionHashes, m_blockTemplateBlob);
+        // Miner tx hash is skipped here because it's not a part of block template
+        m_blockTemplateBlob.insert(m_blockTemplateBlob.end(), m_transactionHashes.begin() + HASH_SIZE * 2, m_transactionHashes.end());
 
-	// Miner tx hash is skipped here because it's not a part of block template
-	m_blockTemplateBlob.insert(m_blockTemplateBlob.end(), m_transactionHashes.begin() + HASH_SIZE, m_transactionHashes.end());
-
-	m_poolBlockTemplate->m_transactions.clear();
+        m_poolBlockTemplate->m_transactions.clear();
 	m_poolBlockTemplate->m_transactions.resize(1);
 	m_poolBlockTemplate->m_transactions.reserve(m_mempoolTxsOrder.size() + 1);
 	for (size_t i = 0, n = m_mempoolTxsOrder.size(); i < n;  ++i) {
-		m_poolBlockTemplate->m_transactions.push_back(m_mempoolTxs[m_mempoolTxsOrder[i]].id);
+                m_poolBlockTemplate->m_transactions.push_back(m_mempoolTxs[m_mempoolTxsOrder[i]].id);
 	}
 
         m_poolBlockTemplate->m_minerWallet = params->m_miningWallet;
@@ -672,7 +704,7 @@ void BlockTemplate::update(const MinerData& data, const Mempool& mempool, const 
 		std::vector<uint8_t> v;
 		v.reserve(HASH_SIZE + 16);
 
-		v.assign(c.data.h, c.data.h + HASH_SIZE);
+		v.assign(c.data.h, c.data.h + HASH_SIZE * 2);
 
 		writeVarint(c.difficulty.lo, v);
 		writeVarint(c.difficulty.hi, v);
@@ -733,6 +765,9 @@ void BlockTemplate::update(const MinerData& data, const Mempool& mempool, const 
 	}
 
 	if (pool_block_debug()) {
+
+        LOGINFO(3, "DEBUG: pool_block_debug() is TRUE - executing debug block");
+
 		const size_t merkle_root_offset = m_extraNonceOffsetInTemplate + m_poolBlockTemplate->m_extraNonceSize + 2 + m_poolBlockTemplate->m_merkleTreeDataSize;
 
 		memcpy(m_blockTemplateBlob.data() + merkle_root_offset, m_poolBlockTemplate->m_merkleRoot.h, HASH_SIZE);
@@ -948,119 +983,194 @@ void BlockTemplate::select_mempool_transactions(const Mempool& mempool)
 	LOGINFO(4, "mempool has " << total_mempool_transactions << " transactions, taking " << m_mempoolTxs.size() << " transactions from it");
 }
 
-int BlockTemplate::create_miner_tx(const MinerData& data, const std::vector<MinerShare>& shares, uint64_t max_reward_amounts_weight, bool dry_run)
+int BlockTemplate::create_miner_tx(const MinerData& data, const std::vector<MinerShare>& shares, uint64_t max_reward_amounts_weight, bool dry_run, uint64_t full_block_reward)
 {
-	// Miner transaction (coinbase)
-	m_minerTx.clear();
+        m_minerTx.clear();
 
         const size_t num_outputs = shares.size();
         m_minerTx.reserve(num_outputs * 39 + 55);
 
-	// tx version
-	m_minerTx.push_back(TX_VERSION);
+        // For Carrot v1 (HF10+), use version 4
+        m_minerTx.push_back(4);  // TRANSACTION_VERSION_CARROT
 
-	// Unlock time
-	writeVarint(MINER_REWARD_UNLOCK_TIME, m_minerTx);
+        writeVarint(MINER_REWARD_UNLOCK_TIME, m_minerTx);
+        m_minerTx.push_back(1);  // Number of inputs
+        m_minerTx.push_back(TXIN_GEN);
+        writeVarint(data.height, m_minerTx);
+        m_poolBlockTemplate->m_txinGenHeight = data.height;
 
-	// Number of inputs
-	m_minerTx.push_back(1);
+        writeVarint(num_outputs, m_minerTx);
 
-	// Input type (txin_gen)
-	m_minerTx.push_back(TXIN_GEN);
+        m_poolBlockTemplate->m_ephPublicKeys.clear();
+        m_poolBlockTemplate->m_outputAmounts.clear();
+        m_poolBlockTemplate->m_ephPublicKeys.reserve(num_outputs);
+        m_poolBlockTemplate->m_outputAmounts.reserve(num_outputs);
 
-	// txin_gen height
-	writeVarint(data.height, m_minerTx);
-	m_poolBlockTemplate->m_txinGenHeight = data.height;
+        uint64_t reward_amounts_weight = 0;
 
-	// Number of outputs (1 output per miner)
-	writeVarint(num_outputs, m_minerTx);
+        // Carrot v1 outputs - prepare shared data for all outputs
+        uint8_t input_context[33];
+        carrot::make_input_context_coinbase(data.height, input_context);
 
-	m_poolBlockTemplate->m_ephPublicKeys.clear();
-	m_poolBlockTemplate->m_outputAmounts.clear();
+        uint8_t null_payment_id[8] = {0};
 
-	m_poolBlockTemplate->m_ephPublicKeys.reserve(num_outputs);
-	m_poolBlockTemplate->m_outputAmounts.reserve(num_outputs);
+        for (size_t i = 0; i < num_outputs; ++i) {
+                // Amount (not encrypted for coinbase)
+                writeVarint(m_rewards[i], [this, &reward_amounts_weight](uint8_t b) {
+                        m_minerTx.push_back(b);
+                        ++reward_amounts_weight;
+                });
 
-	uint64_t reward_amounts_weight = 0;
-	for (size_t i = 0; i < num_outputs; ++i) {
-		writeVarint(m_rewards[i], [this, &reward_amounts_weight](uint8_t b)
-			{
-				m_minerTx.push_back(b);
-				++reward_amounts_weight;
-			});
-		m_minerTx.push_back(TXOUT_TO_TAGGED_KEY);
+                // txout_to_carrot_v1 structure
+                m_minerTx.push_back(TXOUT_TO_CARROT_V1);  // variant tag = 4
 
-		uint8_t view_tag = 0;
+                // K_o - onetime address (32 bytes)
+                hash onetime_address;
+                hash ephemeral_pubkey;
+                uint8_t view_tag[3] = {0};
+                uint8_t encrypted_anchor[16] = {0};
+                        
+                if (!dry_run) {
+                        // Generate janus anchor (randomness for this output)
+                        uint8_t anchor[16];
+                        carrot::generate_janus_anchor(anchor);
+                                
+                        // Generate ephemeral private key
+                        hash ephemeral_privkey;
+                        carrot::make_ephemeral_privkey(
+                            anchor,
+                            input_context,
+                            shares[i].m_wallet->spend_public_key(),
+                            null_payment_id,
+                            ephemeral_privkey);
+                                
+                        // Generate ephemeral public key D_e
+                        carrot::make_ephemeral_pubkey_mainaddress(ephemeral_privkey, ephemeral_pubkey);
+                                
+                        // Generate shared secret (sender-side ECDH)
+                        hash shared_secret_unctx;
+                        if (!carrot::make_shared_secret_sender(
+                                ephemeral_privkey,
+                                shares[i].m_wallet->view_public_key(),
+                                shared_secret_unctx)) {
+                            LOGERR(1, "Failed to generate shared secret for output " << i);
+                            return -4;
+                        }
+                                
+                        // Generate contextualized sender-receiver secret
+                        hash sender_receiver_secret;
+                        carrot::make_sender_receiver_secret(
+                            shared_secret_unctx,
+                            ephemeral_pubkey,
+                            input_context,
+                            sender_receiver_secret);
+                        
+                        // Generate onetime address K_o
+                        carrot::make_onetime_address_coinbase(
+                            shares[i].m_wallet->spend_public_key(),
+                            sender_receiver_secret,
+                            m_rewards[i],
+                            onetime_address);
+                        
+                        // Generate 3-byte view tag
+                        carrot::make_view_tag(shared_secret_unctx, input_context, onetime_address, view_tag);
+                                
+                        // Encrypt janus anchor
+                        carrot::encrypt_anchor(anchor, sender_receiver_secret, onetime_address, encrypted_anchor);
+                        
+                        // Save for pool block template
+                        m_poolBlockTemplate->m_ephPublicKeys.emplace_back(ephemeral_pubkey);
+                        m_poolBlockTemplate->m_outputAmounts.emplace_back(m_rewards[i], view_tag[0]);
 
-		if (dry_run) {
-			m_minerTx.insert(m_minerTx.end(), HASH_SIZE, 0);
-		}
-		else {
-			hash eph_public_key;
-			if (!shares[i].m_wallet->get_eph_public_key(m_poolBlockTemplate->m_txkeySec, i, eph_public_key, view_tag)) {
-				LOGERR(1, "get_eph_public_key failed at index " << i);
-			}
-			m_minerTx.insert(m_minerTx.end(), eph_public_key.h, eph_public_key.h + HASH_SIZE);
-			m_poolBlockTemplate->m_ephPublicKeys.emplace_back(eph_public_key);
-			m_poolBlockTemplate->m_outputAmounts.emplace_back(m_rewards[i], view_tag);
-		}
+                        // Save view_tag and encrypted_anchor for later
+                        std::vector<uint8_t> vt(view_tag, view_tag + 3);
+                        std::vector<uint8_t> ea(encrypted_anchor, encrypted_anchor + 16);
+                        m_poolBlockTemplate->m_viewTags.push_back(vt);
+                        m_poolBlockTemplate->m_encryptedAnchors.push_back(ea);
+                }
 
-		m_minerTx.emplace_back(view_tag);
-	}
+                // Write output data (zeros for dry_run, real values otherwise)
+                m_minerTx.insert(m_minerTx.end(), onetime_address.h, onetime_address.h + HASH_SIZE);
 
-	if (dry_run) {
-		if (reward_amounts_weight != max_reward_amounts_weight) {
-			LOGERR(1, "create_miner_tx: incorrect miner rewards during the dry run (" << reward_amounts_weight << " != " <<  max_reward_amounts_weight << ")");
-			return -1;
-		}
-	}
-	else if (reward_amounts_weight > max_reward_amounts_weight) {
-		LOGERR(1, "create_miner_tx: incorrect miner rewards during the real run (" << reward_amounts_weight << " > " << max_reward_amounts_weight << ")");
-		return -2;
-	}
+                // asset_type - string "SAL1"
+                m_minerTx.push_back(4);  // string length
+                m_minerTx.push_back('S');
+                m_minerTx.push_back('A');
+                m_minerTx.push_back('L');
+                m_minerTx.push_back('1');
 
-	// TX_EXTRA begin
-	m_minerTxExtra.clear();
+                // view_tag and encrypted_anchor
+                m_minerTx.insert(m_minerTx.end(), view_tag, view_tag + 3);
+                m_minerTx.insert(m_minerTx.end(), encrypted_anchor, encrypted_anchor + 16);
+        }
 
-	m_minerTxExtra.push_back(TX_EXTRA_TAG_PUBKEY);
-	m_minerTxExtra.insert(m_minerTxExtra.end(), m_poolBlockTemplate->m_txkeyPub.h, m_poolBlockTemplate->m_txkeyPub.h + HASH_SIZE);
+        if (dry_run) {
+                if (reward_amounts_weight != max_reward_amounts_weight) {
+                        LOGERR(1, "create_miner_tx: incorrect miner rewards during dry run");
+                        return -1;
+                }
+        } else if (reward_amounts_weight > max_reward_amounts_weight) {
+                LOGERR(1, "create_miner_tx: incorrect miner rewards during real run");
+                return -2;
+        }
 
-	m_minerTxExtra.push_back(TX_EXTRA_NONCE);
+        // TX_EXTRA
+        LOGINFO(3, "DEBUG: Carrot extra - major_version=" << data.major_version << ", static_cast<int>(dry_run)=" << static_cast<int>(dry_run) << ", num_eph_keys=" << m_poolBlockTemplate->m_ephPublicKeys.size());
+        m_minerTxExtra.clear();
 
-	const uint64_t corrected_extra_nonce_size = EXTRA_NONCE_SIZE + max_reward_amounts_weight - reward_amounts_weight;
-	if (corrected_extra_nonce_size > EXTRA_NONCE_SIZE) {
-		if (corrected_extra_nonce_size > EXTRA_NONCE_MAX_SIZE) {
-			LOGWARN(5, "create_miner_tx: corrected_extra_nonce_size (" << corrected_extra_nonce_size << ") is too large");
-			return -3;
-		}
-		LOGINFO(4, "increased EXTRA_NONCE from " << EXTRA_NONCE_SIZE << " to " << corrected_extra_nonce_size << " bytes to maintain miner tx weight");
-	}
-	writeVarint(corrected_extra_nonce_size, m_minerTxExtra);
-	
-	uint64_t extraNonceOffsetInMinerTx = m_minerTxExtra.size();
-	m_minerTxExtra.insert(m_minerTxExtra.end(), corrected_extra_nonce_size, 0);
+        // Carrot v1: TX_EXTRA contains ephemeral pubkey, extra_nonce, and merge mining tag
+        // Ephemeral pubkey
+        m_minerTxExtra.push_back(TX_EXTRA_TAG_PUBKEY);
+        if (dry_run) {
+                m_minerTxExtra.insert(m_minerTxExtra.end(), HASH_SIZE, 0);
+        } else {
+                m_minerTxExtra.insert(m_minerTxExtra.end(), 
+                        m_poolBlockTemplate->m_ephPublicKeys[0].h,
+                        m_poolBlockTemplate->m_ephPublicKeys[0].h + HASH_SIZE);
+        }
 
-	m_poolBlockTemplate->m_extraNonceSize = corrected_extra_nonce_size;
+        // Extra nonce
+        m_minerTxExtra.push_back(TX_EXTRA_NONCE);
+        const uint64_t corrected_extra_nonce_size = EXTRA_NONCE_SIZE + max_reward_amounts_weight - reward_amounts_weight;
+        if (corrected_extra_nonce_size > EXTRA_NONCE_MAX_SIZE) {
+                LOGWARN(5, "create_miner_tx: corrected_extra_nonce_size too large");
+                return -3;
+        }
+        writeVarint(corrected_extra_nonce_size, m_minerTxExtra);
+        uint64_t extraNonceOffsetInMinerTx = m_minerTxExtra.size();
+        m_minerTxExtra.insert(m_minerTxExtra.end(), corrected_extra_nonce_size, 0);
+        m_poolBlockTemplate->m_extraNonceSize = corrected_extra_nonce_size;
 
-	m_minerTxExtra.push_back(TX_EXTRA_MERGE_MINING_TAG);
+        // Merge mining tag
+        m_minerTxExtra.push_back(TX_EXTRA_MERGE_MINING_TAG);
+        m_minerTxExtra.push_back(static_cast<uint8_t>(m_poolBlockTemplate->m_merkleTreeDataSize + HASH_SIZE));
+        writeVarint(m_poolBlockTemplate->m_merkleTreeData, m_minerTxExtra);
+        m_minerTxExtra.insert(m_minerTxExtra.end(), HASH_SIZE, 0);
 
-	m_minerTxExtra.push_back(static_cast<uint8_t>(m_poolBlockTemplate->m_merkleTreeDataSize + HASH_SIZE));
-	writeVarint(m_poolBlockTemplate->m_merkleTreeData, m_minerTxExtra);
-	m_minerTxExtra.insert(m_minerTxExtra.end(), HASH_SIZE, 0);
-	// TX_EXTRA end
+        // Write TX_EXTRA to miner tx
+        writeVarint(m_minerTxExtra.size(), m_minerTx);
+        extraNonceOffsetInMinerTx += m_minerTx.size();
+        m_extraNonceOffsetInTemplate = extraNonceOffsetInMinerTx;
+        m_minerTx.insert(m_minerTx.end(), m_minerTxExtra.begin(), m_minerTxExtra.end());
 
-	writeVarint(m_minerTxExtra.size(), m_minerTx);
-	extraNonceOffsetInMinerTx += m_minerTx.size();
-	m_extraNonceOffsetInTemplate = extraNonceOffsetInMinerTx;
-	m_minerTx.insert(m_minerTx.end(), m_minerTxExtra.begin(), m_minerTxExtra.end());
+        m_minerTxExtra.clear();
 
-	m_minerTxExtra.clear();
+        // type = MINER (1)
+        writeVarint(1, m_minerTx);
 
-	// vin_rct_type
-	// Not a part of transaction hash data
-	m_minerTx.push_back(0);
+        // amount_burnt = 20% of total block reward = 25% of miner outputs
+        uint64_t miner_total = 0;
+        for (size_t i = 0; i < num_outputs; ++i) {
+                miner_total += m_rewards[i];
+        }
+        uint64_t stake_amount = full_block_reward / 5;
+        writeVarint(stake_amount, m_minerTx);
 
-	return 1;
+        // Save prefix size - everything up to here is the transaction prefix
+        m_minerTxPrefixSize = static_cast<uint32_t>(m_minerTx.size());
+
+        m_minerTx.push_back(0);  // RCT type
+        return 1;
 }
 
 hash BlockTemplate::calc_sidechain_hash(uint32_t sidechain_extra_nonce) const
@@ -1115,107 +1225,148 @@ hash BlockTemplate::calc_sidechain_hash(uint32_t sidechain_extra_nonce) const
 
 hash BlockTemplate::calc_miner_tx_hash(uint32_t extra_nonce) const
 {
-	// Calculate 3 partial hashes
-	uint8_t hashes[HASH_SIZE * 3];
+        uint8_t hashes[HASH_SIZE * 3];
+        const uint8_t* data = m_blockTemplateBlob.data() + m_minerTxOffsetInTemplate;
+        const size_t prefix_size = m_minerTxPrefixSize;
+        const size_t base_rct_size = m_minerTxSize - prefix_size;
+        
+        LOGINFO(3, "DEBUG: minerTxOffsetInTemplate=" << m_minerTxOffsetInTemplate << ", m_minerTxSize=" << m_minerTxSize);
+        LOGINFO(3, "DEBUG: First 20 bytes of miner tx in template:");
+        char hex_buf[128] = {0};
+        for (size_t i = 0; i < 20 && i < m_minerTxSize; ++i) {
+                snprintf(hex_buf + i*2, 3, "%02x", data[i]);
+        }
+        LOGINFO(3, static_cast<const char*>(hex_buf));
 
-	const uint8_t* data = m_blockTemplateBlob.data() + m_minerTxOffsetInTemplate;
+        // Pre-Carrot: original logic with patching
+        const size_t extra_nonce_offset = m_extraNonceOffsetInTemplate - m_minerTxOffsetInTemplate;
+        const uint8_t extra_nonce_buf[EXTRA_NONCE_SIZE] = {
+                static_cast<uint8_t>(extra_nonce >> 0),
+                static_cast<uint8_t>(extra_nonce >> 8),
+                static_cast<uint8_t>(extra_nonce >> 16),
+                static_cast<uint8_t>(extra_nonce >> 24)
+        };
 
-	const size_t extra_nonce_offset = m_extraNonceOffsetInTemplate - m_minerTxOffsetInTemplate;
-	const uint8_t extra_nonce_buf[EXTRA_NONCE_SIZE] = {
-		static_cast<uint8_t>(extra_nonce >> 0),
-		static_cast<uint8_t>(extra_nonce >> 8),
-		static_cast<uint8_t>(extra_nonce >> 16),
-		static_cast<uint8_t>(extra_nonce >> 24)
-	};
+        hash merge_mining_root;
+        {
+                const hash sidechain_id = calc_sidechain_hash(extra_nonce);
+                const uint32_t n_aux_chains = static_cast<uint32_t>(m_poolBlockTemplate->m_auxChains.size() + 1);
+                const uint32_t aux_slot = get_aux_slot(m_sidechain->consensus_hash(), m_poolBlockTemplate->m_auxNonce, n_aux_chains);
+                merge_mining_root = get_root_from_proof(sidechain_id, m_poolBlockTemplate->m_merkleProof, aux_slot, n_aux_chains);
+        }
 
-	// Calculate sidechain id and merge mining root hash with this extra_nonce
-	hash merge_mining_root;
-	{
-		const hash sidechain_id = calc_sidechain_hash(extra_nonce);
-		const uint32_t n_aux_chains = static_cast<uint32_t>(m_poolBlockTemplate->m_auxChains.size() + 1);
-		const uint32_t aux_slot = get_aux_slot(m_sidechain->consensus_hash(), m_poolBlockTemplate->m_auxNonce, n_aux_chains);
-		merge_mining_root = get_root_from_proof(sidechain_id, m_poolBlockTemplate->m_merkleProof, aux_slot, n_aux_chains);
-	}
+        const size_t merkle_root_offset = extra_nonce_offset + m_poolBlockTemplate->m_extraNonceSize + 2 + m_poolBlockTemplate->m_merkleTreeDataSize;
 
-	const size_t merkle_root_offset = extra_nonce_offset + m_poolBlockTemplate->m_extraNonceSize + 2 + m_poolBlockTemplate->m_merkleTreeDataSize;
+        // 1. Hash prefix with extra_nonce and merge_mining_root applied
+        hash full_hash;
+        uint8_t tx_buf[288];
 
-	// 1. Prefix (everything except vin_rct_type byte in the end)
-	// Apply extra_nonce in-place because we can't write to the block template here
-	const size_t tx_size = m_minerTxSize - 1;
+        const size_t N = m_minerTxKeccakStateInputLength;
+        const bool b = N && (N <= extra_nonce_offset) && (N < prefix_size) && (prefix_size - N <= sizeof(tx_buf));
 
-	hash full_hash;
-	uint8_t tx_buf[288];
+        LOGINFO(6, "DEBUG: extra_nonce=" << extra_nonce << ", extra_nonce_offset=" << extra_nonce_offset << ", merkle_root_offset=" << merkle_root_offset);
 
-	const size_t N = m_minerTxKeccakStateInputLength;
-	const bool b = N && (N <= extra_nonce_offset) && (N < tx_size) && (tx_size - N <= sizeof(tx_buf));
+        // DEBUG: Log what we're actually hashing
+        std::vector<uint8_t> debug_prefix(prefix_size);
+        for (size_t i = 0; i < prefix_size; ++i) {
+            uint32_t k = static_cast<uint32_t>(i - extra_nonce_offset);
+            if (k < EXTRA_NONCE_SIZE) {
+                debug_prefix[i] = extra_nonce_buf[k];
+            } else {
+                k = static_cast<uint32_t>(i - merkle_root_offset);
+                if (k < HASH_SIZE) {
+                    debug_prefix[i] = merge_mining_root.h[k];
+                } else {
+                    debug_prefix[i] = data[i];
+                }
+            }
+        }
+        LOGINFO(6, "DEBUG: Hashing prefix (" << prefix_size << " bytes): " << log::hex_buf(debug_prefix.data(), std::min(size_t(120), prefix_size)));
 
-	// Slow path: O(N)
-	if (!b || pool_block_debug())
-	{
-		keccak_custom([data, extra_nonce_offset, &extra_nonce_buf, merkle_root_offset, &merge_mining_root](int offset) {
-			uint32_t k = static_cast<uint32_t>(offset - static_cast<int>(extra_nonce_offset));
-			if (k < EXTRA_NONCE_SIZE) {
-				return extra_nonce_buf[k];
-			}
+        // Slow path: O(N)
+        if (!b || pool_block_debug())
+        {
+                keccak_custom([data, extra_nonce_offset, &extra_nonce_buf, merkle_root_offset, &merge_mining_root](int offset) {
+                        uint32_t k = static_cast<uint32_t>(offset - static_cast<int>(extra_nonce_offset));
+                        if (k < EXTRA_NONCE_SIZE) {
+                                return extra_nonce_buf[k];
+                        }
 
-			k = static_cast<uint32_t>(offset - static_cast<int>(merkle_root_offset));
-			if (k < HASH_SIZE) {
-				return merge_mining_root.h[k];
-			}
+                        k = static_cast<uint32_t>(offset - static_cast<int>(merkle_root_offset));
+                        if (k < HASH_SIZE) {
+                                return merge_mining_root.h[k];
+                        }
 
-			return data[offset];
-		}, static_cast<int>(tx_size), full_hash.h, HASH_SIZE);
-		memcpy(hashes, full_hash.h, HASH_SIZE);
-	}
+                        return data[offset];
+                }, static_cast<int>(prefix_size), full_hash.h, HASH_SIZE);
+                memcpy(hashes, full_hash.h, HASH_SIZE);
+        }
 
-	// Fast path: O(1)
-	if (b) {
-		const int inlen = static_cast<int>(tx_size - N);
+        // Fast path: O(1)
+        if (b) {
+                const int inlen = static_cast<int>(prefix_size - N);
 
-		memcpy(tx_buf, data + N, inlen);
-		memcpy(tx_buf + extra_nonce_offset - N, extra_nonce_buf, EXTRA_NONCE_SIZE);
-		memcpy(tx_buf + merkle_root_offset - N, merge_mining_root.h, HASH_SIZE);
+                memcpy(tx_buf, data + N, inlen);
+                memcpy(tx_buf + extra_nonce_offset - N, extra_nonce_buf, EXTRA_NONCE_SIZE);
+                memcpy(tx_buf + merkle_root_offset - N, merge_mining_root.h, HASH_SIZE);
 
-		std::array<uint64_t, 25> st = m_minerTxKeccakState;
-		keccak_finish(tx_buf, inlen, st);
+                std::array<uint64_t, 25> st = m_minerTxKeccakState;
+                keccak_finish(tx_buf, inlen, st);
 
-		if (pool_block_debug() && (memcmp(st.data(), full_hash.h, HASH_SIZE) != 0)) {
-			LOGERR(1, "calc_miner_tx_hash fast path is broken. Fix the code!");
-		}
+                if (pool_block_debug() && (memcmp(st.data(), full_hash.h, HASH_SIZE) != 0)) {
+                        LOGERR(1, "calc_miner_tx_hash fast path is broken. Fix the code!");
+                }
 
-		memcpy(hashes, st.data(), HASH_SIZE);
-	}
+                memcpy(hashes, st.data(), HASH_SIZE);
+        }
 
-	// 2. Base RCT, single 0 byte in miner tx
-	static constexpr uint8_t known_second_hash[HASH_SIZE] = {
-		188,54,120,158,122,30,40,20,54,70,66,41,130,143,129,125,102,18,247,180,119,214,101,145,255,150,169,224,100,188,201,138
-	};
-	memcpy(hashes + HASH_SIZE, known_second_hash, HASH_SIZE);
+        // 2. Hash base RCT (type + amount_burnt bytes)
+        uint8_t base_rct_hash[HASH_SIZE];
+        keccak(data + prefix_size, static_cast<int>(base_rct_size), base_rct_hash);
+        memcpy(hashes + HASH_SIZE, base_rct_hash, HASH_SIZE);
 
-	// 3. Prunable RCT, empty in miner tx
-	memset(hashes + HASH_SIZE * 2, 0, HASH_SIZE);
+        // 3. Prunable RCT is null for coinbase
+        memset(hashes + HASH_SIZE * 2, 0, HASH_SIZE);
 
-	// Calculate miner transaction hash
-	hash result;
-	keccak(hashes, sizeof(hashes), result.h);
+        // Calculate miner transaction hash (hash of the 3 hashes)
+        hash result;
+        keccak(hashes, sizeof(hashes), result.h);
 
-	return result;
+        // Debug: log the component hashes
+        char prefix_hash_hex[65] = {0};
+        char base_rct_hash_hex[65] = {0};
+        char prunable_hash_hex[65] = {0};
+        char final_hash_hex[65] = {0};
+        for (int i = 0; i < 32; ++i) {
+                snprintf(prefix_hash_hex + i*2, 3, "%02x", hashes[i]);
+                snprintf(base_rct_hash_hex + i*2, 3, "%02x", hashes[32 + i]);
+                snprintf(prunable_hash_hex + i*2, 3, "%02x", hashes[64 + i]);
+                snprintf(final_hash_hex + i*2, 3, "%02x", result.h[i]);
+        }
+        LOGINFO(3, "Miner TX hash components:");
+        LOGINFO(3, "  Prefix hash:   " << static_cast<const char*>(prefix_hash_hex));
+        LOGINFO(3, "  Base RCT hash: " << static_cast<const char*>(base_rct_hash_hex));
+        LOGINFO(3, "  Prunable hash: " << static_cast<const char*>(prunable_hash_hex));
+        LOGINFO(3, "  Final TX hash: " << static_cast<const char*>(final_hash_hex));
+        LOGINFO(3, "  Prefix size: " << prefix_size << ", Base RCT size: " << base_rct_size << ", Total TX size: " << m_minerTxSize);
+
+        return result;
 }
 
 void BlockTemplate::calc_merkle_tree_main_branch()
 {
-	m_merkleTreeMainBranch.clear();
-
-	const uint64_t count = m_numTransactionHashes + 1;
-	if (count == 1) {
-		return;
-	}
-
-	const uint8_t* h = m_transactionHashes.data();
-
-	if (count == 2) {
-		m_merkleTreeMainBranch.insert(m_merkleTreeMainBranch.end(), h + HASH_SIZE, h + HASH_SIZE * 2);
-	}
+        m_merkleTreeMainBranch.clear();
+        const uint64_t count = m_numTransactionHashes + (m_majorVersion >= 10 ? 2 : 1);
+        if (count == 1) {
+                return;
+        }
+        const uint8_t* h = m_transactionHashes.data();
+        if (count == 2) {
+                hash protocol_hash;
+                memcpy(protocol_hash.h, h + HASH_SIZE, HASH_SIZE);
+                LOGINFO(3, "Merkle branch protocol tx hash: " << protocol_hash);
+                m_merkleTreeMainBranch.insert(m_merkleTreeMainBranch.end(), h + HASH_SIZE, h + HASH_SIZE * 2);
+        }
 	else {
 		size_t i, j, cnt;
 
@@ -1249,6 +1400,18 @@ void BlockTemplate::calc_merkle_tree_main_branch()
 
 		m_merkleTreeMainBranch.insert(m_merkleTreeMainBranch.end(), ints.data() + HASH_SIZE, ints.data() + HASH_SIZE * 2);
 	}
+        // DEBUG: Log the calculated merkle root
+        if (m_majorVersion >= 10) {
+            hash merkle_root;
+            // The merkle root is the hash of (miner_hash + last_branch_element)
+            uint8_t buf[HASH_SIZE * 2];
+            memcpy(buf, m_transactionHashes.data(), HASH_SIZE);
+            if (!m_merkleTreeMainBranch.empty()) {
+                memcpy(buf + HASH_SIZE, m_merkleTreeMainBranch.data() + m_merkleTreeMainBranch.size() - HASH_SIZE, HASH_SIZE);
+                keccak(buf, sizeof(buf), merkle_root.h);
+                LOGINFO(6, "Calculated merkle root: " << merkle_root);
+            }
+        }
 }
 
 bool BlockTemplate::get_difficulties(const uint32_t template_id, uint64_t& height, uint64_t& sidechain_height, difficulty_type& mainchain_difficulty, difficulty_type& aux_diff, difficulty_type& sidechain_difficulty) const
@@ -1315,31 +1478,62 @@ uint32_t BlockTemplate::get_hashing_blob(uint32_t extra_nonce, uint8_t (&blob)[1
 
 uint32_t BlockTemplate::get_hashing_blob_nolock(uint32_t extra_nonce, uint8_t* blob) const
 {
-	uint8_t* p = blob;
+        uint8_t* p = blob;
+        // Block header
+        memcpy(p, m_blockTemplateBlob.data(), m_blockHeaderSize);
+        p += m_blockHeaderSize;
+        
+        // Merkle tree hash
+        hash root_hash = calc_miner_tx_hash(extra_nonce);
+        
+        // For Carrot v1 (HF10+) with protocol TX, simple 2-transaction merkle tree
+        if (m_majorVersion >= 10) {
+                // Just hash miner TX hash + protocol TX hash
+                uint8_t merkle_data[HASH_SIZE * 2];
+                memcpy(merkle_data, root_hash.h, HASH_SIZE);
+                // Protocol TX hash is the first (and only) entry in transaction hashes after miner TX
+                memcpy(merkle_data + HASH_SIZE, m_protocolTxHash.h, HASH_SIZE);
+                
+                // DEBUG: Show what we're actually hashing
+                LOGINFO(6, "DEBUG: About to hash merkle data (raw bytes):");
+                LOGINFO(6, "  Full 64 bytes: " << log::hex_buf(merkle_data, HASH_SIZE * 2));
 
-	// Block header
-	memcpy(p, m_blockTemplateBlob.data(), m_blockHeaderSize);
-	p += m_blockHeaderSize;
+                LOGINFO(6, "  First 32 bytes (miner):   " << log::hex_buf(merkle_data, HASH_SIZE));
+                LOGINFO(6, "  Second 32 bytes (protocol): " << log::hex_buf(merkle_data + HASH_SIZE, HASH_SIZE));
+                LOGINFO(6, "  m_transactionHashes size: " << m_transactionHashes.size());
+                
+                keccak(merkle_data, HASH_SIZE * 2, root_hash.h);
 
-	// Merkle tree hash
-	hash root_hash = calc_miner_tx_hash(extra_nonce);
+                // DEBUG: Verify the result
+                LOGINFO(6, "  Result merkle root: " << log::hex_buf(root_hash.h, HASH_SIZE));
+                
+                // DEBUG: Manually verify by re-hashing
+                hash verify_hash;
+                keccak(merkle_data, HASH_SIZE * 2, verify_hash.h);
+                LOGINFO(6, "  Verify merkle root: " << log::hex_buf(verify_hash.h, HASH_SIZE));
 
-	for (size_t i = 0; i < m_merkleTreeMainBranch.size(); i += HASH_SIZE) {
-		uint8_t h[HASH_SIZE * 2];
+        } else {
+                // Pre-Carrot: use merkle branch logic
+                for (size_t i = 0; i < m_merkleTreeMainBranch.size(); i += HASH_SIZE) {
+                        uint8_t h[HASH_SIZE * 2];
+                        memcpy(h, root_hash.h, HASH_SIZE);
+                        memcpy(h + HASH_SIZE, m_merkleTreeMainBranch.data() + i, HASH_SIZE);
+                        keccak(h, HASH_SIZE * 2, root_hash.h);
+                }
+        }
+        
+        memcpy(p, root_hash.h, HASH_SIZE);
+        p += HASH_SIZE;
+        
+        // Total number of transactions in this block (including the miner tx)
+        // FOR HF10+, include both miner tx and protocol tx
+        const uint64_t tx_count_in_header = m_numTransactionHashes + (m_majorVersion >= 10 ? 2 : 1);
+        writeVarint(tx_count_in_header, [&p](uint8_t b) { *(p++) = b; });
 
-		memcpy(h, root_hash.h, HASH_SIZE);
-		memcpy(h + HASH_SIZE, m_merkleTreeMainBranch.data() + i, HASH_SIZE);
-
-		keccak(h, HASH_SIZE * 2, root_hash.h);
-	}
-
-	memcpy(p, root_hash.h, HASH_SIZE);
-	p += HASH_SIZE;
-
-	// Total number of transactions in this block (including the miner tx)
-	writeVarint(m_numTransactionHashes + 1, [&p](uint8_t b) { *(p++) = b; });
-
-	return static_cast<uint32_t>(p - blob);
+        // DEBUG: Show what hashing blob we're creating
+        LOGINFO(6, "DEBUG get_hashing_blob result (" << static_cast<uint32_t>(p - blob) << " bytes): " << log::hex_buf(blob, std::min(size_t(76), static_cast<size_t>(p - blob))));
+        
+        return static_cast<uint32_t>(p - blob);
 }
 
 uint32_t BlockTemplate::get_hashing_blobs(uint32_t extra_nonce_start, uint32_t count, std::vector<uint8_t>& blobs, uint64_t& height, difficulty_type& difficulty, difficulty_type& aux_diff, difficulty_type& sidechain_difficulty, hash& seed_hash, size_t& nonce_offset, uint32_t& template_id) const
@@ -1478,34 +1672,35 @@ bool BlockTemplate::get_aux_proof(const uint32_t template_id, uint32_t extra_non
 
 std::vector<uint8_t> BlockTemplate::get_block_template_blob(uint32_t template_id, uint32_t sidechain_extra_nonce, size_t& nonce_offset, size_t& extra_nonce_offset, size_t& merkle_root_offset, hash& merge_mining_root, const BlockTemplate** pThis) const
 {
-	ReadLock lock(m_lock);
+        ReadLock lock(m_lock);
+        if (template_id != m_templateId) {
+                const BlockTemplate* old = m_oldTemplates[template_id % array_size(&BlockTemplate::m_oldTemplates)];
+                if (old && (template_id == old->m_templateId)) {
+                        return old->get_block_template_blob(template_id, sidechain_extra_nonce, nonce_offset, extra_nonce_offset, merkle_root_offset, merge_mining_root, pThis);
+                }
+                nonce_offset = 0;
+                extra_nonce_offset = 0;
+                merkle_root_offset = 0;
+                merge_mining_root = {};
+                return std::vector<uint8_t>();
+        }
 
-	if (template_id != m_templateId) {
-		const BlockTemplate* old = m_oldTemplates[template_id % array_size(&BlockTemplate::m_oldTemplates)];
-		if (old && (template_id == old->m_templateId)) {
-			return old->get_block_template_blob(template_id, sidechain_extra_nonce, nonce_offset, extra_nonce_offset, merkle_root_offset, merge_mining_root, pThis);
-		}
-
-		nonce_offset = 0;
-		extra_nonce_offset = 0;
-		merkle_root_offset = 0;
-		merge_mining_root = {};
-		return std::vector<uint8_t>();
-	}
-
-	nonce_offset = m_nonceOffset;
-	extra_nonce_offset = m_extraNonceOffsetInTemplate;
-
-	const hash sidechain_id = calc_sidechain_hash(sidechain_extra_nonce);
-	const uint32_t n_aux_chains = static_cast<uint32_t>(m_poolBlockTemplate->m_auxChains.size() + 1);
-	const uint32_t aux_slot = get_aux_slot(m_sidechain->consensus_hash(), m_poolBlockTemplate->m_auxNonce, n_aux_chains);
-	merge_mining_root = get_root_from_proof(sidechain_id, m_poolBlockTemplate->m_merkleProof, aux_slot, n_aux_chains);
-
-	merkle_root_offset = m_extraNonceOffsetInTemplate + m_poolBlockTemplate->m_extraNonceSize + 2 + m_poolBlockTemplate->m_merkleTreeDataSize;
-
-	*pThis = this;
-
-	return m_blockTemplateBlob;
+        nonce_offset = m_nonceOffset;
+        extra_nonce_offset = m_extraNonceOffsetInTemplate;
+        
+        const hash sidechain_id = calc_sidechain_hash(sidechain_extra_nonce);
+        const uint32_t n_aux_chains = static_cast<uint32_t>(m_poolBlockTemplate->m_auxChains.size() + 1);
+        const uint32_t aux_slot = get_aux_slot(m_sidechain->consensus_hash(), m_poolBlockTemplate->m_auxNonce, n_aux_chains);
+        merge_mining_root = get_root_from_proof(sidechain_id, m_poolBlockTemplate->m_merkleProof, aux_slot, n_aux_chains);
+        
+        if (m_extraNonceOffsetInTemplate > 0) {
+                merkle_root_offset = m_extraNonceOffsetInTemplate + m_poolBlockTemplate->m_extraNonceSize + 2 + m_poolBlockTemplate->m_merkleTreeDataSize;
+        } else {
+                merkle_root_offset = 0;
+        }
+        
+        *pThis = this;
+        return m_blockTemplateBlob;
 }
 
 bool BlockTemplate::submit_sidechain_block(uint32_t template_id, uint32_t nonce, uint32_t extra_nonce)
@@ -1576,6 +1771,20 @@ bool BlockTemplate::submit_sidechain_block(uint32_t template_id, uint32_t nonce,
 
 	LOGWARN(3, "failed to submit a share: template id " << template_id << " is too old/out of range, current template id is " << m_templateId);
 	return false;
+}
+
+hash BlockTemplate::calc_tx_merkle_root(uint32_t extra_nonce) const
+{
+    const hash miner_hash = calc_miner_tx_hash(extra_nonce);
+    const uint8_t* protocol_hash_ptr = m_transactionHashes.data() + HASH_SIZE;
+    
+    uint8_t combined[HASH_SIZE * 2];
+    memcpy(combined, miner_hash.h, HASH_SIZE);
+    memcpy(combined + HASH_SIZE, protocol_hash_ptr, HASH_SIZE);
+    
+    hash result;
+    keccak(combined, HASH_SIZE * 2, result.h);
+    return result;
 }
 
 void BlockTemplate::init_merge_mining_merkle_proof()

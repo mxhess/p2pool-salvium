@@ -116,6 +116,8 @@ struct PoolBlock
 
 	std::vector<indexed_hash> m_ephPublicKeys;
 	std::vector<TxOutput> m_outputAmounts;
+        std::vector<std::vector<uint8_t>> m_viewTags;
+        std::vector<std::vector<uint8_t>> m_encryptedAnchors;
 
 	hash m_txkeyPub;
 	uint64_t m_extraNonceSize;

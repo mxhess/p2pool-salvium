@@ -75,10 +75,12 @@ private:
 
 private:
 	void select_mempool_transactions(const Mempool& mempool);
-	int create_miner_tx(const MinerData& data, const std::vector<MinerShare>& shares, uint64_t max_reward_amounts_weight, bool dry_run);
+	int create_miner_tx(const MinerData& data, const std::vector<MinerShare>& shares, uint64_t max_reward_amounts_weight, bool dry_run, uint64_t full_block_reward);
 	hash calc_sidechain_hash(uint32_t sidechain_extra_nonce) const;
 	hash calc_miner_tx_hash(uint32_t extra_nonce) const;
+        hash calc_tx_merkle_root(uint32_t extra_nonce) const;
 	void calc_merkle_tree_main_branch();
+        hash m_protocolTxHash;
 
 	uint32_t get_hashing_blob_nolock(uint32_t extra_nonce, uint8_t* blob) const;
 
@@ -100,6 +102,7 @@ private:
 	size_t m_numTransactionHashes;
 	hash m_prevId;
 	std::atomic<uint64_t> m_height;
+        uint8_t m_majorVersion;
 	difficulty_type m_difficulty;
 	difficulty_type m_auxDifficulty;
 	hash m_seedHash;
@@ -115,10 +118,12 @@ private:
 #endif
 
 	std::atomic<uint64_t> m_finalReward;
+        std::atomic<uint64_t> m_fullBlockReward;
 
 	// Temp vectors, will be cleaned up after use and skipped in copy constructor/assignment operators
 	std::vector<uint8_t> m_minerTx;
 	std::array<uint64_t, 25> m_minerTxKeccakState;
+        uint32_t m_minerTxPrefixSize;
 	size_t m_minerTxKeccakStateInputLength;
 
 	std::vector<uint8_t> m_sidechainHashBlob;

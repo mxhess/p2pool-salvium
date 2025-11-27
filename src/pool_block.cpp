@@ -20,6 +20,7 @@
 #include "keccak.h"
 #include "side_chain.h"
 #include "pow_hash.h"
+#include "protocol_tx_hash.h"
 #include "crypto.h"
 #include "merkle.h"
 
@@ -219,12 +220,31 @@ std::vector<uint8_t> PoolBlock::serialize_mainchain_data(size_t* header_size, si
 	memcpy(p, m_merkleRoot.h, HASH_SIZE);
 	p += HASH_SIZE;
 
-	writeVarint(static_cast<size_t>(p - tx_extra), data);
-	data.insert(data.end(), tx_extra, p);
+        writeVarint(static_cast<size_t>(p - tx_extra), data);
+        data.insert(data.end(), tx_extra, p);
 
-	data.push_back(0);
+        // For Carrot v1+ (major_version >= 10), add type and amount_burnt instead of vin_rct_type
+        if (m_majorVersion >= 10) {
+            // type = MINER
+            writeVarint(1, data);
+    
+            // amount_burnt = 20% of total reward
+            uint64_t miner_total = 0;
+            for (const TxOutput& output : m_outputAmounts) {
+                miner_total += output.m_reward;
+            }
+            uint64_t stake_amount = miner_total / 4;
+            writeVarint(stake_amount, data);
 
-	if (miner_tx_size) {
+            data.push_back(0);
+
+        }
+        else {
+            // vin_rct_type (only for legacy transactions)
+            data.push_back(0);
+        }
+
+        if (miner_tx_size) {
 		*miner_tx_size = data.size() - header_size0;
 	}
 
@@ -248,12 +268,14 @@ std::vector<uint8_t> PoolBlock::serialize_mainchain_data(size_t* header_size, si
                 
                 // type = PROTOCOL
                 writeVarint(2, data);  // transaction_type::PROTOCOL = 2
+                data.push_back(0); // RCT
                 
-                // rct_signatures (null)
-                data.push_back(0);  // RCTTypeNull
+                // Calculate protocol tx hash using salviumd-compatible serialization
+                hash protocol_tx_hash;
+                calculate_protocol_tx_hash(m_txinGenHeight, protocol_tx_hash);
+                LOGINFO(3, "Sidechain protocol TX hash: " << protocol_tx_hash);
         }
-
-	writeVarint(m_transactions.size() - 1, data);
+        writeVarint(m_transactions.size() - 1, data);
 
 #ifdef WITH_INDEXED_HASHES
 	for (size_t i = 1, n = m_transactions.size(); i < n; ++i) {

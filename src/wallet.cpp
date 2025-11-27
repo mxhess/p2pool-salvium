@@ -121,7 +121,7 @@ bool Wallet::decode(const char* address)
         }
 
         const size_t addr_len = strlen(address);
-        if (addr_len < 97 || addr_len > 98) {
+        if (addr_len < 94 || addr_len > 140) {
                 return false;
         }
 
@@ -198,6 +198,24 @@ bool Wallet::decode(const char* address)
 
         memcpy(m_spendPublicKey.h, data + varint_len, HASH_SIZE);
         memcpy(m_viewPublicKey.h, data + varint_len + HASH_SIZE, HASH_SIZE);
+
+        // DEBUG: Print what we decoded
+        {
+            static constexpr char log_category_prefix[] = "Wallet ";
+            char spend_hex[65] = {0}, view_hex[65] = {0}, data_hex[200] = {0}, prefix_hex[20] = {0};
+            for (int i = 0; i < 32; i++) {
+                sprintf(spend_hex + i*2, "%02x", m_spendPublicKey.h[i]);
+                sprintf(view_hex + i*2, "%02x", m_viewPublicKey.h[i]);
+            }
+            for (int i = 0; i < std::min(data_index, 80); i++) {
+                sprintf(data_hex + i*2, "%02x", data[i]);
+            }
+            sprintf(prefix_hex, "0x%lx", m_prefix);
+            LOGINFO(0, "decode varint_len=" << varint_len << " data_index=" << data_index << " prefix=" << static_cast<const char*>(prefix_hex));
+            LOGINFO(0, "decode raw_data: " << static_cast<const char*>(data_hex));
+            LOGINFO(0, "decode spend:    " << static_cast<const char*>(spend_hex));
+            LOGINFO(0, "decode view:     " << static_cast<const char*>(view_hex));
+        }
 
         // Load checksum from correct position (at end of decoded data)
         memcpy(&m_checksum, data + data_index - sizeof(m_checksum), sizeof(m_checksum));

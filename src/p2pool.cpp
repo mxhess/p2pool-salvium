@@ -1148,23 +1148,30 @@ void p2pool::submit_block() const
 
 	request = "{\"jsonrpc\":\"2.0\",\"id\":\"0\",\"method\":\"submit_block\",\"params\":[\"";
 
-	const uint32_t template_id = submit_data.template_id;
-	const uint32_t nonce = submit_data.nonce;
-	const uint32_t extra_nonce = submit_data.extra_nonce;
+        const uint32_t template_id = submit_data.template_id;
+        const uint32_t nonce = submit_data.nonce;
+        const uint32_t extra_nonce = submit_data.extra_nonce;
 
-	std::vector<uint8_t> blob;
-	blob.reserve(submit_data.blob.size());
+        std::vector<uint8_t> blob;
+        blob.reserve(submit_data.blob.size());
 
-	for (size_t i = 0; i < submit_data.blob.size(); ++i) {
-		uint8_t b;
-		if (nonce_offset && nonce_offset <= i && i < nonce_offset + sizeof(submit_data.nonce)) {
-			b = submit_data.nonce & 255;
-			submit_data.nonce >>= 8;
-		}
-		else if (extra_nonce_offset && extra_nonce_offset <= i && i < extra_nonce_offset + sizeof(submit_data.extra_nonce)) {
-			b = submit_data.extra_nonce & 255;
-			submit_data.extra_nonce >>= 8;
-		}
+        LOGINFO(0, "DEBUG submit_block offsets: nonce_offset=" << nonce_offset 
+                << ", extra_nonce_offset=" << extra_nonce_offset 
+                << ", merkle_root_offset=" << merkle_root_offset
+                << ", blob_size=" << submit_data.blob.size());
+
+        for (size_t i = 0; i < submit_data.blob.size(); ++i) {
+                uint8_t b;
+                if (nonce_offset && nonce_offset <= i && i < nonce_offset + sizeof(nonce)) {
+                        b = (nonce >> ((i - nonce_offset) * 8)) & 255;
+                }
+                else if (extra_nonce_offset && extra_nonce_offset <= i && i < extra_nonce_offset + sizeof(extra_nonce)) {
+                        b = (extra_nonce >> ((i - extra_nonce_offset) * 8)) & 255;
+                        if (i == extra_nonce_offset) {
+                                LOGINFO(0, "DEBUG: Patching extra_nonce at offset " << i << ", value=" << extra_nonce);
+                        }
+
+                }
 		else if (merkle_root_offset && merkle_root_offset <= i && i < merkle_root_offset + HASH_SIZE) {
 			b = merge_mining_root.h[i - merkle_root_offset];
 		}
@@ -1178,6 +1185,10 @@ void p2pool::submit_block() const
 		blob.push_back(b);
 	}
 	request.append("\"]}");
+
+        // DEBUG: Show what we're actually sending
+        std::string sent_blob_hex = request.substr(request.find("\":[\"")+4, 400);
+        LOGINFO(0, "DEBUG: First 200 bytes of hex being sent: " << sent_blob_hex.substr(0, 400));
 
 	hash digest;
 	sha256(blob.data(), static_cast<uint32_t>(blob.size()), digest.h);
