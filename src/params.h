@@ -22,6 +22,11 @@
 namespace p2pool {
 
 static constexpr uint64_t DEFAULT_STRATUM_BAN_TIME = 600;
+// Donation mode cycle lengths (in mainchain blocks)
+// Mainnet: every 720 blocks (~1 day at 2 min block time)
+// Testnet/Stagenet: every 100 blocks (~3.3 hours)
+constexpr uint64_t DONATION_CYCLE_MAINNET = 720;
+constexpr uint64_t DONATION_CYCLE_TESTNET = 100;
 
 struct Params
 {

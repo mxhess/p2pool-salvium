@@ -64,7 +64,10 @@ public:
 		AUX_JOB_DONATION,
 		// Broadcast 3rd-party Monero blocks to make the whole Monero network faster
 		MONERO_BLOCK_BROADCAST,
-		LAST = MONERO_BLOCK_BROADCAST,
+                // Genesis reconciliation for chain compatibility
+                GENESIS_INFO,
+                LAST = GENESIS_INFO,
+                
 	};
 
 	explicit P2PServer(p2pool *pool);
@@ -122,6 +125,7 @@ public:
 		[[nodiscard]] bool on_peer_list_request(const uint8_t* buf);
 		void on_peer_list_response(const uint8_t* buf);
 		void on_block_notify(const uint8_t* buf);
+       		[[nodiscard]] bool on_genesis_info(const uint8_t* buf);
 		[[nodiscard]] bool on_aux_job_donation(const uint8_t* buf, uint32_t size);
 		[[nodiscard]] bool on_monero_block_broadcast(const uint8_t* buf, uint32_t size);
 

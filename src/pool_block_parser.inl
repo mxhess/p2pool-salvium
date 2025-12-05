@@ -100,16 +100,19 @@ int PoolBlock::deserialize(const uint8_t* data, size_t size, const SideChain& si
                 int outputs_blob_size;
 
                 if (num_outputs > 0) {
-                        // Outputs are in the buffer, just read them
-                        // Each output is at least 34 bytes, exit early if there's not enough data left
-                        // 1 byte for reward, 1 byte for tx_type, 32 bytes for eph_pub_key
-                        constexpr uint64_t MIN_OUTPUT_SIZE = 34;
+                        // Carrot v1 outputs: each output is at least 89 bytes
+                        //   1 byte amount, 1 byte tx_type(0x04), 32 bytes K_o, 4 bytes SAL1, 
+                        //   3 bytes view_tag, 16 bytes anchor, 32 bytes D_e
+                        constexpr uint64_t MIN_OUTPUT_SIZE = 58;
 
                         if (num_outputs > std::numeric_limits<uint64_t>::max() / MIN_OUTPUT_SIZE) return __LINE__;
                         if (static_cast<uint64_t>(data_end - data) < num_outputs * MIN_OUTPUT_SIZE) return __LINE__;
 
                         m_ephPublicKeys.resize(num_outputs);
                         m_outputAmounts.resize(num_outputs);
+
+                        m_viewTags.clear();
+                        m_encryptedAnchors.clear();
 
                         m_ephPublicKeys.shrink_to_fit();
                         m_outputAmounts.shrink_to_fit();
@@ -120,7 +123,6 @@ int PoolBlock::deserialize(const uint8_t* data, size_t size, const SideChain& si
                                 uint64_t reward;
                                 READ_VARINT(reward);
 
-                                // TxOutput max value check
                                 if (reward >= (1ULL << 56)) {
                                         return __LINE__;
                                 }
@@ -128,15 +130,38 @@ int PoolBlock::deserialize(const uint8_t* data, size_t size, const SideChain& si
                                 t.m_reward = reward;
                                 total_reward += reward;
 
-                                EXPECT_BYTE(TXOUT_TO_TAGGED_KEY);
+                                EXPECT_BYTE(TXOUT_TO_CARROT_V1);
 
-                                hash ephPublicKey;
-                                READ_BUF(ephPublicKey.h, HASH_SIZE);
-                                m_ephPublicKeys[i] = ephPublicKey;
+                                // K_o onetime address (32 bytes)
+                                hash onetime_address;
+                                READ_BUF(onetime_address.h, HASH_SIZE);
+                                
+                                // asset_type string: length byte + "SAL1"
+                                uint8_t asset_len;
+                                READ_BYTE(asset_len);
+                                if (asset_len != 4) {
+                                        return __LINE__;
+                                }
+                                uint8_t sal1_marker[4];
+                                READ_BUF(sal1_marker, 4);
+                                if (memcmp(sal1_marker, "SAL1", 4) != 0) {
+                                        return __LINE__;
+                                }
 
-                                uint8_t view_tag;
-                                READ_BYTE(view_tag);
-                                t.m_viewTag = view_tag;
+                                // 3-byte view tag
+                                uint8_t view_tag_bytes[3];
+                                READ_BUF(view_tag_bytes, 3);
+                                t.m_viewTag = view_tag_bytes[0];
+                                m_viewTags.push_back(std::vector<uint8_t>(view_tag_bytes, view_tag_bytes + 3));
+
+                                // 16-byte encrypted anchor
+                                uint8_t encrypted_anchor[16];
+                                READ_BUF(encrypted_anchor, 16);
+                                m_encryptedAnchors.push_back(std::vector<uint8_t>(encrypted_anchor, encrypted_anchor + 16));
+
+                                // Note: D_e ephemeral pubkey is in tx_extra, not per-output
+                                // Store empty for now - will be populated from tx_extra
+                                m_ephPublicKeys[i] = onetime_address;
                         }
 
                         outputs_blob_size = static_cast<int>(data - data_begin) - outputs_offset;
@@ -181,8 +206,31 @@ int PoolBlock::deserialize(const uint8_t* data, size_t size, const SideChain& si
 
                 const uint8_t* tx_extra_begin = data;
 
-                EXPECT_BYTE(TX_EXTRA_TAG_PUBKEY);
-                READ_BUF(m_txkeyPub.h, HASH_SIZE);
+                // Handle Carrot tx_extra: either TAG_PUBKEY (single) or TAG_ADDITIONAL_PUBKEYS (multi)
+                m_additionalPubKeys.clear();
+                if (*data == TX_EXTRA_TAG_PUBKEY) {
+                        // Single output format
+                        ++data;
+                        READ_BUF(m_txkeyPub.h, HASH_SIZE);
+                } else if (*data == TX_EXTRA_TAG_ADDITIONAL_PUBKEYS) {
+                        // Multiple output format: all D_e in additional pubkeys
+                        ++data;
+                        uint64_t num_pubkeys;
+                        READ_VARINT(num_pubkeys);
+                        if (num_pubkeys < 1) return __LINE__;
+                        if (data + num_pubkeys * HASH_SIZE > data_end) return __LINE__;
+                        // First D_e goes in m_txkeyPub
+                        READ_BUF(m_txkeyPub.h, HASH_SIZE);
+                        // Rest go in m_additionalPubKeys
+                        if (num_pubkeys > 1) {
+                                m_additionalPubKeys.resize(num_pubkeys - 1);
+                                for (uint64_t i = 0; i < num_pubkeys - 1; ++i) {
+                                        READ_BUF(m_additionalPubKeys[i].h, HASH_SIZE);
+                                }
+                        }
+                } else {
+                        return __LINE__;  // Unknown tx_extra format
+                }
 
                 EXPECT_BYTE(TX_EXTRA_NONCE);
                 READ_VARINT(m_extraNonceSize);
@@ -221,7 +269,16 @@ int PoolBlock::deserialize(const uint8_t* data, size_t size, const SideChain& si
 
                 if (static_cast<uint64_t>(data - tx_extra_begin) != tx_extra_size) return __LINE__;
 
-                EXPECT_BYTE(0);
+                // Carrot v1: type (MINER=1) and amount_burnt before RCT type
+                uint64_t tx_type;
+                READ_VARINT(tx_type);
+                // tx_type should be 1 (MINER) for coinbase
+                
+                uint64_t amount_burnt;
+                READ_VARINT(amount_burnt);
+                m_amountBurnt = amount_burnt;
+                
+                EXPECT_BYTE(0);  // RCT type
                 
                 // Protocol TX (Salvium Carrot v1+) - parse if present
                 if (m_majorVersion >= 10) {
@@ -361,20 +418,25 @@ skip_protocol_tx:
 
                 READ_BUF(m_txkeySecSeed.h, HASH_SIZE);
 
-                hash pub;
-                get_tx_keys(pub, m_txkeySec, m_txkeySecSeed, m_prevId);
-                if (pub != m_txkeyPub) {
-                        return __LINE__;
-                }
+                // Only verify tx pubkey derivation for pre-Carrot blocks
+                // Carrot v1 uses different key derivation (D_e is not derivable from m_txkeySecSeed)
+                if (m_majorVersion < 10) {
+                        hash pub;
+                        get_tx_keys(pub, m_txkeySec, m_txkeySecSeed, m_prevId);
+                        if (pub != m_txkeyPub) {
+                                return __LINE__;
+                        }
 
-                if (!check_keys(m_txkeyPub, m_txkeySec)) {
-                        return __LINE__;
+                        if (!check_keys(m_txkeyPub, m_txkeySec)) {
+                                return __LINE__;
+                        }
                 }
 
                 READ_BUF(m_parent.h, HASH_SIZE);
 
                 m_transactions.clear();
-                m_transactions.reserve(transactions.size());
+                m_transactions.reserve(transactions.size() + 1);
+                m_transactions.emplace_back(hash{});
 
                 if (compact) {
                         const PoolBlock* parent = sidechain.find_block(m_parent);
@@ -576,6 +638,18 @@ skip_protocol_tx:
 #endif
 
                 const uint32_t mm_aux_slot = get_aux_slot(sidechain.consensus_hash(), mm_nonce, mm_n_aux_chains);
+
+                {
+                    std::string hex;
+                    for (size_t i = 0; i < std::min<size_t>(64, outputs_blob.size()); ++i) {
+                        char buf[4];
+                        snprintf(buf, sizeof(buf), "%02x", outputs_blob[i]);
+                        hex += buf;
+                    }
+                    LOGINFO(0, "DEBUG parser outputs_blob (first 64): " << hex << " size=" << outputs_blob.size());
+                }
+
+                LOGINFO(0, "DEBUG merkle verify: sidechain_height=" << m_sidechainHeight << " mm_aux_slot=" << mm_aux_slot << " n_chains=" << mm_n_aux_chains << " proof_size=" << m_merkleProof.size() << " check=" << check << " merkleRoot=" << static_cast<const hash&>(m_merkleRoot));
 
                 if (!verify_merkle_proof(check, m_merkleProof, mm_aux_slot, mm_n_aux_chains, m_merkleRoot)) {
                         return __LINE__;

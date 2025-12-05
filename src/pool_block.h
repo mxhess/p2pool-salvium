@@ -119,7 +119,9 @@ struct PoolBlock
         std::vector<std::vector<uint8_t>> m_viewTags;
         std::vector<std::vector<uint8_t>> m_encryptedAnchors;
 
+        uint64_t m_amountBurnt;
 	hash m_txkeyPub;
+        std::vector<hash> m_additionalPubKeys;
 	uint64_t m_extraNonceSize;
 	uint32_t m_extraNonce;
 
@@ -193,7 +195,7 @@ struct PoolBlock
 	hash m_powHash;
 	hash m_seed;
 
-	std::vector<uint8_t> serialize_mainchain_data(size_t* header_size = nullptr, size_t* miner_tx_size = nullptr, int* outputs_offset = nullptr, int* outputs_blob_size = nullptr, const uint32_t* nonce = nullptr, const uint32_t* extra_nonce = nullptr) const;
+        std::vector<uint8_t> serialize_mainchain_data(size_t* header_size = nullptr, size_t* miner_tx_size = nullptr, int* outputs_offset = nullptr, int* outputs_blob_size = nullptr, const uint32_t* nonce = nullptr, const uint32_t* extra_nonce = nullptr, bool include_tx_hashes = true) const;
 	std::vector<uint8_t> serialize_sidechain_data() const;
 
 	[[nodiscard]] int deserialize(const uint8_t* data, size_t size, const SideChain& sidechain, uv_loop_t* loop, bool compact);

@@ -418,6 +418,41 @@ void encrypt_anchor(
     debug_hex("anchor encrypted", encrypted_anchor, 16);
 }
 
+void derive_deterministic_anchor_from_pubkey(
+    const hash& tx_key_seed,
+    const hash& spend_public_key,
+    uint8_t (&anchor)[16])
+{
+    // anchor = H_16("p2pool_anchor_v2" || tx_key_seed || spend_public_key)
+    const char domain[] = "p2pool_anchor_v2";
+    uint8_t data[sizeof(domain) + 32 + 32];
+    memcpy(data, domain, sizeof(domain));
+    memcpy(data + sizeof(domain), tx_key_seed.h, 32);
+    memcpy(data + sizeof(domain) + 32, spend_public_key.h, 32);
+    
+    hash h;
+    blake2b_hash(h.h, 16, data, sizeof(data), nullptr, 0);
+    memcpy(anchor, h.h, 16);
+}
+
+void derive_transaction_ephemeral_privkey(
+    const hash& tx_key_seed,
+    const uint8_t (&input_context)[33],
+    hash& ephemeral_privkey_out)
+{
+    // d_e = H_n("p2pool_tx_eph_v1" || tx_key_seed || input_context)
+    const char domain[] = "p2pool_tx_eph_v1";
+    uint8_t data[sizeof(domain) + 32 + 33];
+    memcpy(data, domain, sizeof(domain));
+    memcpy(data + sizeof(domain), tx_key_seed.h, 32);
+    memcpy(data + sizeof(domain) + 32, input_context, 33);
+    
+    // Derive scalar (reduces to valid ed25519 scalar)
+    derive_scalar(data, sizeof(data), nullptr, ephemeral_privkey_out.h);
+    
+    debug_hex("tx_eph d_e", ephemeral_privkey_out.h, 32);
+}
+
 } // namespace carrot
 } // namespace p2pool
 

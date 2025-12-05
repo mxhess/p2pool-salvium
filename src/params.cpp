@@ -361,11 +361,26 @@ Params::Params(int argc, char* const argv[])
 		m_mainWallet.encode(display_wallet_buf);
 	}
 
-	// Initialize dev wallet
-	const char* dev_wallet_str = "SC11VXXJyJTZcFJikJrgQKE2HmfXCt2DnRoM7tLB2vm3H2urbN1bUvaVGHY1osS4pmKrQ558cXmAf4nRYDayAmER6PYG6QRoNX";
-	if (!m_devWallet.decode(dev_wallet_str)) {
-		LOGERR(1, "Failed to decode dev wallet address");
-	}
+        // Initialize dev wallet based on network type
+        const char* dev_wallet_str = nullptr;
+        if (m_mainWallet.valid()) {
+                switch (m_mainWallet.type()) {
+                case NetworkType::Mainnet:
+                        dev_wallet_str = "SC11VXXJyJTZcFJikJrgQKE2HmfXCt2DnRoM7tLB2vm3H2urbN1bUvaVGHY1osS4pmKrQ558cXmAf4nRYDayAmER6PYG6QRoNX";
+                        break;
+                case NetworkType::Testnet:
+                        dev_wallet_str = "SC1ToqmproHYLhyPtehEMhE6dYRT7YziKRhaTtRCX2tVFDjqPJDXKtHPfLDvD6pn5b8pm1ZLrDQ2FfcHUEtapFDnbxk5RBBYmqT"; 
+                        break;
+                case NetworkType::Stagenet:
+                        dev_wallet_str = "";
+                        break;
+                default:
+                        break;
+                }
+        }
+        if (dev_wallet_str && !m_devWallet.decode(dev_wallet_str)) {
+                LOGERR(1, "Failed to decode dev wallet address");
+        }
 
 	m_displayWallet.assign(display_wallet_buf, Wallet::ADDRESS_LENGTH);
 }

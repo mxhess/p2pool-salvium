@@ -72,6 +72,7 @@ SideChain::SideChain(p2pool* pool, NetworkType type, const char* pool_name, cons
 	, m_chainWindowSize(2160)
 	, m_unclePenalty(20)
 	, m_precalcFinished(false)
+        , m_externalBlockFailures(0)
 #ifdef DEV_TEST_SYNC
 	, m_firstPruneTime(0)
 #endif
@@ -245,9 +246,47 @@ bool SideChain::fill_sidechain_data(PoolBlock& block, std::vector<MinerShare>& s
 
 	const PoolBlock* tip = m_chainTip;
 
-	if (!tip) {
+        if (!tip) {
+                // If we've learned of a peer's genesis, wait for their chain instead of creating our own
+		if (!m_adoptedGenesisId.empty()) {
+			const uint64_t elapsed = seconds_since_epoch() - m_adoptedGenesisTime;
+			const uint64_t timeout = 90;
+			
+			if (elapsed < timeout) {
+				// Log every 15 seconds so user knows we're working
+				if ((elapsed % 15) < 2) {
+					LOGINFO(3, "Waiting for peer's genesis block " << m_adoptedGenesisId 
+						<< " (" << elapsed << "s / " << timeout << "s)");
+				}
+				return false;
+			}
+			
+			// Timeout - give up on peer's genesis and create our own
+			LOGWARN(3, "Timeout waiting for peer's genesis block after " << elapsed 
+				<< "s, creating own genesis");
+			m_adoptedGenesisId = {};
+			m_adoptedGenesisTimestamp = 0;
+			m_adoptedGenesisHeight = 0;
+			m_adoptedGenesisTime = 0;
+		}
+
+		// Don't create genesis block until initial peer sync has been attempted
+		// This prevents nodes from creating independent chains when starting simultaneously
+		if (!m_precalcFinished.load()) {
+			P2PServer* p2p = m_pool->p2p_server();
+			if (p2p && (p2p->peer_list_size() > 0 || p2p->num_connections() > 0)) {
+				LOGINFO(5, "Waiting for initial peer sync before creating genesis block");
+				return false;
+			}
+		}
+
+		// No peers with existing chain - create our own genesis
+		LOGINFO(3, "Creating new genesis block (no peer chain found)");
+		m_genesisDecisionMade = true;
+
 		block.m_parent = {};
 		block.m_sidechainHeight = 0;
+
 		block.m_difficulty = m_minDifficulty;
 		block.m_cumulativeDifficulty = m_minDifficulty;
 		block.m_txkeySecSeed = m_consensusHash;
@@ -374,7 +413,7 @@ bool SideChain::get_shares(const PoolBlock* tip, std::vector<MinerShare>& shares
 	;
 
 	if (m_pool && !tip->m_parent.empty()) {
-		const uint64_t h = p2pool::get_seed_height(tip->m_txinGenHeight);
+                const uint64_t h = tip->m_txinGenHeight;
 		if (!m_pool->get_difficulty_at_height(h, mainchain_diff)) {
 			LOGWARN(L, "get_shares: couldn't get mainchain difficulty for height = " << h);
 			return false;
@@ -432,6 +471,8 @@ bool SideChain::get_shares(const PoolBlock* tip, std::vector<MinerShare>& shares
 			result.first->m_weight += cur_weight;
 		}
 		pplns_weight += cur_weight;
+
+                LOGINFO(0, "get_shares: height=" << cur->m_sidechainHeight << " wallet=" << cur->m_minerWallet << " pplns_weight=" << pplns_weight << " max=" << max_pplns_weight << " mainchain_h=" << tip->m_txinGenHeight << " depth=" << block_depth);
 
 		// One non-uncle share can go above the limit, but it will also guarantee that "shares" is never empty
 		if (pplns_weight > max_pplns_weight) {
@@ -601,7 +642,7 @@ bool SideChain::add_external_block(PoolBlock& block, std::vector<hash>& missing_
 		if (!m_pool->get_difficulty_at_height(block.m_txinGenHeight, diff)) {
 			LOGWARN(3, "add_external_block: couldn't get mainchain difficulty for height = " << block.m_txinGenHeight);
 		}
-		else if (diff.check_pow(block.m_powHash)) {
+		else if (diff.check_pow(block.m_powHash) && (block.m_txinGenHeight + 2 >= miner_data.height)) {
 			LOGINFO(0, log::LightGreen() << "add_external_block: block " << block.m_sidechainId << " has enough PoW for Salvium height " << block.m_txinGenHeight << ", submitting it");
 			m_pool->submit_block_async(block.serialize_mainchain_data());
 		}
@@ -679,7 +720,30 @@ bool SideChain::add_external_block(PoolBlock& block, std::vector<hash>& missing_
 		m_pool->api_update_block_found(&data, &block);
 	}
 
-	return add_block(block);
+        const bool added = add_block(block);
+        if (added && block.m_verified) {
+            if (block.m_invalid) {
+                ++m_externalBlockFailures;
+                LOGWARN(3, "external block validation failed, failure count: " << m_externalBlockFailures << "/" << DIVERGENCE_THRESHOLD);
+                if (m_externalBlockFailures >= DIVERGENCE_THRESHOLD) {
+                    LOGERR(0, log::LightRed() << "DIVERGENCE DETECTED: " << m_externalBlockFailures << " consecutive external block failures. Purging cache and restarting...");
+                    // Delete cache file
+                    const std::string cache_path = "p2pool.cache";
+                    remove(cache_path.c_str());
+                    // Signal shutdown - systemd will restart
+                    if (m_pool) {
+                        m_pool->stop();
+                    }
+                }
+            } else {
+                // Valid external block - reset counter
+                if (m_externalBlockFailures > 0) {
+                    LOGINFO(3, "external block validated successfully, resetting failure counter from " << m_externalBlockFailures);
+                    m_externalBlockFailures = 0;
+                }
+            }
+        }
+        return added;
 }
 
 bool SideChain::add_block(const PoolBlock& block)
@@ -809,6 +873,16 @@ const PoolBlock* SideChain::get_block_blob(const hash& id, std::vector<uint8_t>&
 	}
 
 	blob = block->serialize_mainchain_data();
+        {
+            std::string hex;
+            size_t start = 43; // approximate outputs offset
+            for (size_t i = start; i < std::min<size_t>(start + 64, blob.size()); ++i) {
+                char buf[4];
+                snprintf(buf, sizeof(buf), "%02x", blob[i]);
+                hex += buf;
+            }
+            LOGINFO(0, "DEBUG get_block_blob outputs area (64 bytes from offset 43): " << hex);
+        }
 	const std::vector<uint8_t> sidechain_data = block->serialize_sidechain_data();
 	blob.insert(blob.end(), sidechain_data.begin(), sidechain_data.end());
 
@@ -837,28 +911,75 @@ bool SideChain::get_outputs_blob(PoolBlock* block, uint64_t total_reward, std::v
 		ReadLock lock(m_sidechainLock);
 
 		auto it = block->m_sidechainId.empty() ? m_blocksById.end() : m_blocksById.find(block->m_sidechainId);
-		if (it != m_blocksById.end()) {
-			const PoolBlock* b = it->second;
-			const size_t n = b->m_outputAmounts.size();
+                if (it != m_blocksById.end()) {
+                        const PoolBlock* b = it->second;
+                        const size_t n = b->m_outputAmounts.size();
+                        
+                        blob.reserve(n * 58 + 64);
+                        writeVarint(n, blob);
+                        
+                        for (size_t i = 0; i < n; ++i) {
+                                const PoolBlock::TxOutput& output = b->m_outputAmounts[i];
+                                writeVarint(output.m_reward, blob);
+                                blob.emplace_back(TXOUT_TO_CARROT_V1);
+                                const hash h = b->m_ephPublicKeys[i];
+                                blob.insert(blob.end(), h.h, h.h + HASH_SIZE);
+                                
+                                if (b->m_majorVersion >= 10) {
+                                        // Carrot v1 format
+                                        blob.push_back(4);
+                                        blob.push_back('S');
+                                        blob.push_back('A');
+                                        blob.push_back('L');
+                                        blob.push_back('1');
+                                        blob.insert(blob.end(), b->m_viewTags[i].begin(), b->m_viewTags[i].end());
+                                        blob.insert(blob.end(), b->m_encryptedAnchors[i].begin(), b->m_encryptedAnchors[i].end());
+                                } else {
+                                        blob.emplace_back(static_cast<uint8_t>(output.m_viewTag));
+                                }
+                        }
+                        
+                        block->m_ephPublicKeys = b->m_ephPublicKeys;
+                        block->m_outputAmounts = b->m_outputAmounts;
+                        block->m_viewTags = b->m_viewTags;
+                        block->m_encryptedAnchors = b->m_encryptedAnchors;
+                        return true;
+                }
 
-			blob.reserve(n * 39 + 64);
-			writeVarint(n, blob);
+                // For Carrot v1+ external blocks, K_o values are NOT derivable from m_txkeySec
+                // They must be preserved from parsing (computed via Carrot crypto)
+                if (block->m_majorVersion >= 10 && !block->m_ephPublicKeys.empty()) {
+                        const size_t n = block->m_ephPublicKeys.size();
+                        blob.reserve(n * 58 + 64);
+                        writeVarint(n, blob);
+                        for (size_t i = 0; i < n; ++i) {
+                                const PoolBlock::TxOutput& output = block->m_outputAmounts[i];
+                                writeVarint(output.m_reward, blob);
+                                blob.emplace_back(TXOUT_TO_CARROT_V1);
+                                blob.insert(blob.end(), block->m_ephPublicKeys[i].h, block->m_ephPublicKeys[i].h + HASH_SIZE);
+                                // Carrot v1 format
+                                blob.push_back(4);
+                                blob.push_back('S');
+                                blob.push_back('A');
+                                blob.push_back('L');
+                                blob.push_back('1');
+                                blob.insert(blob.end(), block->m_viewTags[i].begin(), block->m_viewTags[i].end());
+                                blob.insert(blob.end(), block->m_encryptedAnchors[i].begin(), block->m_encryptedAnchors[i].end());
+                        }
+                        return true;
+                }
 
-			for (size_t i = 0; i < n; ++i) {
-				const PoolBlock::TxOutput& output = b->m_outputAmounts[i];
-				writeVarint(output.m_reward, blob);
-				blob.emplace_back(TXOUT_TO_TAGGED_KEY);
-				const hash h = b->m_ephPublicKeys[i];
-				blob.insert(blob.end(), h.h, h.h + HASH_SIZE);
-				blob.emplace_back(static_cast<uint8_t>(output.m_viewTag));
-			}
+                // Can't compute outputs from PPLNS if we don't have this block's parent chain
+                if (!block->m_parent.empty()) {
+                        auto parent_it = m_blocksById.find(block->m_parent);
+                        if (parent_it == m_blocksById.end()) {
+                                LOGINFO(5, "get_outputs_blob: can't compute outputs, parent " << block->m_parent << " not found");
+                                return false;
+                        }
+                }
 
-			block->m_ephPublicKeys = b->m_ephPublicKeys;
-			block->m_outputAmounts = b->m_outputAmounts;
-			return true;
-		}
+                data = std::make_shared<Data>();
 
-		data = std::make_shared<Data>();
 		data->blockMinerWallet = block->m_minerWallet;
 		data->txkeySec = block->m_txkeySec;
 
@@ -866,8 +987,8 @@ bool SideChain::get_outputs_blob(PoolBlock* block, uint64_t total_reward, std::v
 			return false;
 		}
                 // Handle donation mode during validation - match block creation logic
-                const uint64_t block_height = block->m_sidechainHeight;
-                if ((block_height % 100) == 0 && m_devWallet) {
+                const uint64_t donation_cycle = (s_networkType == NetworkType::Mainnet) ? DONATION_CYCLE_MAINNET : DONATION_CYCLE_TESTNET;
+                if ((block->m_txinGenHeight % donation_cycle) == 0 && m_devWallet) {
                 	// This is a donation block - replace all shares with single dev wallet output
                 	difficulty_type total_weight;
                 	for (const auto& share : data->tmpShares) {
@@ -919,7 +1040,8 @@ bool SideChain::get_outputs_blob(PoolBlock* block, uint64_t total_reward, std::v
 
 	block->m_ephPublicKeys.clear();
 	block->m_outputAmounts.clear();
-
+        block->m_viewTags.clear();
+        block->m_encryptedAnchors.clear();
 	block->m_ephPublicKeys.reserve(n);
 	block->m_outputAmounts.reserve(n);
 
@@ -934,7 +1056,7 @@ bool SideChain::get_outputs_blob(PoolBlock* block, uint64_t total_reward, std::v
 
 		writeVarint(tmpRewards[i], blob);
 
-		blob.emplace_back(TXOUT_TO_TAGGED_KEY);
+		blob.emplace_back(TXOUT_TO_CARROT_V1);
 
 		uint8_t view_tag;
 		if (!data->tmpShares[i].m_wallet->get_eph_public_key(data->txkeySec, i, eph_public_key, view_tag)) {
@@ -1531,12 +1653,17 @@ void SideChain::verify(PoolBlock* block)
 			!block->m_uncles.empty() ||
 			(block->m_difficulty != m_minDifficulty) ||
 			(block->m_cumulativeDifficulty != m_minDifficulty) ||
-			(block->m_txkeySecSeed != m_consensusHash))
+                        (block->m_txkeySecSeed != m_consensusHash))
 		{
+			LOGWARN(3, "genesis block validation failed: height=" << block->m_sidechainHeight 
+				<< " parent_empty=" << (block->m_parent.empty() ? 1 : 0)
+				<< " diff=" << block->m_difficulty << " expected=" << m_minDifficulty);
 			block->m_invalid = true;
 		}
-
 		block->m_verified = true;
+		if (!block->m_invalid) {
+			LOGINFO(3, "Genesis block verified: " << block->m_sidechainId);
+		}
 		return;
 	}
 
@@ -1556,7 +1683,8 @@ void SideChain::verify(PoolBlock* block)
 	// Regular block
 
 	// Must have a parent
-	if (block->m_parent.empty()) {
+        if (block->m_parent.empty()) {
+		LOGWARN(3, "block at height = " << block->m_sidechainHeight << ", id = " << block->m_sidechainId << ", mainchain height = " << block->m_txinGenHeight << " has empty parent (non-genesis)");
 		block->m_verified = true;
 		block->m_invalid = true;
 		return;
@@ -1571,7 +1699,8 @@ void SideChain::verify(PoolBlock* block)
 
 	// If it's invalid then this block is also invalid
 	const PoolBlock* parent = it->second;
-	if (parent->m_invalid) {
+        if (parent->m_invalid) {
+		LOGWARN(3, "block at height = " << block->m_sidechainHeight << ", id = " << block->m_sidechainId << ", mainchain height = " << block->m_txinGenHeight << ": get_shares failed");
 		block->m_verified = true;
 		block->m_invalid = true;
 		return;
@@ -1580,7 +1709,7 @@ void SideChain::verify(PoolBlock* block)
 	// Check m_txkeySecSeed
 	const hash h = (block->m_prevId == parent->m_prevId) ? parent->m_txkeySecSeed : parent->calculate_tx_key_seed();
 	if (block->m_txkeySecSeed != h) {
-		LOGWARN(3, "block " << block->m_sidechainId << " has invalid tx key seed: expected " << h << ", got " << block->m_txkeySecSeed);
+		LOGWARN(3, "block at height = " << block->m_sidechainHeight << ", id = " << block->m_sidechainId << ", mainchain height = " << block->m_txinGenHeight << " has invalid parent " << block->m_parent);
 		block->m_verified = true;
 		block->m_invalid = true;
 		return;
@@ -1746,15 +1875,13 @@ void SideChain::verify(PoolBlock* block)
 		diff = difficulty();
 	}
 	else if (!get_difficulty(parent, m_difficultyData, diff)) {
+                LOGWARN(3, "block at height = " << block->m_sidechainHeight << ", id = " << block->m_sidechainId << ", mainchain height = " << block->m_txinGenHeight << ": get_difficulty failed for parent " << block->m_parent);
 		block->m_invalid = true;
 		return;
 	}
 
 	if (diff != block->m_difficulty) {
-		LOGWARN(3, "block at height = " << block->m_sidechainHeight <<
-			", id = " << block->m_sidechainId <<
-			", mainchain height = " << block->m_txinGenHeight <<
-			" has wrong difficulty: got " << block->m_difficulty << ", expected " << diff);
+		LOGWARN(3, "block at height = " << block->m_sidechainHeight << ", id = " << block->m_sidechainId << ", mainchain height = " << block->m_txinGenHeight << " has wrong difficulty: got " << block->m_difficulty << ", expected " << diff);
 		block->m_invalid = true;
 		return;
 	}
@@ -1766,13 +1893,15 @@ void SideChain::verify(PoolBlock* block)
 		shares = std::move(block->m_precalculatedShares);
 	}
 
-	if (shares.empty() && !get_shares(block, shares)) {
+        if (shares.empty() && !get_shares(block, shares)) {
+		LOGWARN(3, "block at height = " << block->m_sidechainHeight << ", id = " << block->m_sidechainId << ", mainchain height = " << block->m_txinGenHeight << ": get_shares failed");
 		block->m_invalid = true;
 		return;
 	}
 
         // Handle donation mode during verification - match block creation logic
-        if ((block->m_sidechainHeight % 100) == 0 && m_devWallet) {
+        const uint64_t donation_cycle = (s_networkType == NetworkType::Mainnet) ? DONATION_CYCLE_MAINNET : DONATION_CYCLE_TESTNET;
+        if ((block->m_txinGenHeight % donation_cycle) == 0 && m_devWallet) {
         	difficulty_type total_weight;
         	for (const auto& share : shares) {
         		total_weight += share.m_weight;
@@ -1814,50 +1943,58 @@ void SideChain::verify(PoolBlock* block)
 		return;
 	}
 
-	for (size_t i = 0, n = rewards.size(); i < n; ++i) {
-		const PoolBlock::TxOutput& out = block->m_outputAmounts[i];
+        // Carrot v1 validation - generate and sort expected outputs
+        struct ValidationOutput {
+            size_t share_index;
+            uint64_t reward;
+            hash ko;
+            uint8_t view_tag;
+        };
+        std::vector<ValidationOutput> expected;
+        expected.reserve(rewards.size());
 
-		if (rewards[i] != out.m_reward) {
-			LOGWARN(3, "block at height = " << block->m_sidechainHeight <<
-				", id = " << block->m_sidechainId <<
-				", mainchain height = " << block->m_txinGenHeight <<
-				" has invalid reward at index " << i << ": got " << out.m_reward << ", expected " << rewards[i]);
-			block->m_invalid = true;
-			return;
-		}
+        for (size_t i = 0; i < rewards.size(); ++i) {
+            ValidationOutput out;
+            out.share_index = i;
+            out.reward = rewards[i];
+            if (!shares[i].m_wallet->get_eph_public_key_carrot(block->m_txkeySecSeed, block->m_txinGenHeight, i, rewards[i], out.ko, out.view_tag)) {
+                LOGWARN(3, "block at height " << block->m_sidechainHeight << " failed to generate K_o at index " << i);
+                block->m_invalid = true;
+                return;
+            }
+            expected.push_back(out);
+        }
 
-		hash eph_public_key;
-		uint8_t view_tag;
-		if (!shares[i].m_wallet->get_eph_public_key(block->m_txkeySec, i, eph_public_key, view_tag)) {
-			LOGWARN(3, "block at height = " << block->m_sidechainHeight <<
-				", id = " << block->m_sidechainId <<
-				", mainchain height = " << block->m_txinGenHeight <<
-				" failed to eph_public_key at index " << i);
-			block->m_invalid = true;
-			return;
-		}
+        // Sort by K_o
+        std::sort(expected.begin(), expected.end(),
+            [](const ValidationOutput& a, const ValidationOutput& b) {
+                return memcmp(a.ko.h, b.ko.h, HASH_SIZE) < 0;
+            });
 
-		if (out.m_viewTag != view_tag) {
-			LOGWARN(3, "block at height = " << block->m_sidechainHeight <<
-				", id = " << block->m_sidechainId <<
-				", mainchain height = " << block->m_txinGenHeight <<
-				" has an incorrect view tag at index " << i);
-			block->m_invalid = true;
-			return;
-		}
+        // Validate sorted outputs
+        for (size_t i = 0; i < expected.size(); ++i) {
+            const ValidationOutput& exp = expected[i];
+            const PoolBlock::TxOutput& actual = block->m_outputAmounts[i];
 
-		if (eph_public_key != block->m_ephPublicKeys[i]) {
-			LOGWARN(3, "block at height = " << block->m_sidechainHeight <<
-				", id = " << block->m_sidechainId <<
-				", mainchain height = " << block->m_txinGenHeight <<
-				" pays out to a wrong wallet at index " << i);
-			block->m_invalid = true;
-			return;
-		}
-	}
+            if (exp.reward != actual.m_reward) {
+                LOGWARN(3, "block at height " << block->m_sidechainHeight << " has invalid reward at position " << i);
+                block->m_invalid = true;
+                return;
+            }
+            if (exp.view_tag != actual.m_viewTag) {
+                LOGWARN(3, "block at height " << block->m_sidechainHeight << " has invalid view_tag at position " << i);
+                block->m_invalid = true;
+                return;
+            }
+            if (exp.ko != block->m_ephPublicKeys[i]) {
+                LOGWARN(3, "block at height " << block->m_sidechainHeight << " has invalid K_o at position " << i);
+                block->m_invalid = true;
+                return;
+            }
+        }
 
-	// All checks passed
-	block->m_invalid = false;
+        // All checks passed
+        block->m_invalid = false;
 }
 
 void SideChain::update_chain_tip(PoolBlock* block)
@@ -2338,6 +2475,105 @@ void SideChain::get_missing_blocks(unordered_set<hash>& missing_blocks) const
 			}
 		}
 	}
+}
+
+bool SideChain::consider_peer_genesis(const hash& genesis_id, uint64_t timestamp, uint64_t height)
+{
+	// Get our current genesis info for comparison
+	uint64_t our_genesis_timestamp = 0;
+	hash our_genesis_id;
+	{
+		ReadLock lock(m_sidechainLock);
+		auto it = m_blocksByHeight.find(0);
+		if (it != m_blocksByHeight.end() && !it->second.empty()) {
+			our_genesis_timestamp = it->second.front()->m_timestamp;
+			our_genesis_id = it->second.front()->m_sidechainId;
+		}
+	}
+
+	// If we have a genesis and peer's is older (or same timestamp but lower hash), we need to yield
+	if (m_genesisDecisionMade && our_genesis_timestamp > 0) {
+		const bool peer_wins = (timestamp < our_genesis_timestamp) ||
+			(timestamp == our_genesis_timestamp && genesis_id < our_genesis_id);
+		
+		if (peer_wins) {
+			LOGWARN(3, "Peer has older genesis (theirs=" << timestamp 
+				<< " ours=" << our_genesis_timestamp << "), purging to re-sync");
+			purge_sidechain();
+			// Fall through to adopt peer's genesis
+		} else {
+			// Our genesis is older or same, keep it
+			return true;
+		}
+	}
+
+        if (m_adoptedGenesisTimestamp == 0 || timestamp < m_adoptedGenesisTimestamp ||
+		(timestamp == m_adoptedGenesisTimestamp && genesis_id < m_adoptedGenesisId)) {
+		LOGINFO(3, "Adopting older genesis from peer: " << genesis_id 
+			<< " timestamp=" << timestamp << " height=" << height);
+		m_adoptedGenesisId = genesis_id;
+		m_adoptedGenesisTimestamp = timestamp;
+		m_adoptedGenesisHeight = height;
+		m_adoptedGenesisTime = seconds_since_epoch();
+	}
+
+	return true;
+}
+
+void SideChain::purge_sidechain()
+{
+	LOGWARN(3, "Purging sidechain to adopt older genesis from peer");
+
+	WriteLock lock(m_sidechainLock);
+
+	// Free all block memory
+	for (auto& it : m_blocksById) {
+		delete it.second;
+	}
+
+	// Clear all block tracking
+	m_blocksById.clear();
+	m_blocksByHeight.clear();
+	m_blocksByMerkleRoot.clear();
+	m_chainTip = nullptr;
+
+	// Clear difficulty data
+	m_difficultyData.clear();
+
+	// Reset genesis state to allow new genesis adoption
+	m_genesisDecisionMade = false;
+	m_adoptedGenesisId = {};
+	m_adoptedGenesisTimestamp = 0;
+	m_adoptedGenesisHeight = 0;
+	m_adoptedGenesisTime = 0;
+
+	// Delete cache files to prevent reload of old blocks on restart
+	const std::string cache_path = DATA_DIR + "p2pool.cache";
+	const std::string version_path = DATA_DIR + "p2pool.cache.version";
+	
+	if (remove(cache_path.c_str()) == 0) {
+		LOGINFO(3, "Deleted cache file: " << cache_path);
+	}
+	if (remove(version_path.c_str()) == 0) {
+		LOGINFO(3, "Deleted cache version file: " << version_path);
+	}
+	LOGINFO(3, "Sidechain purged, ready to sync from peer");
+}
+
+bool SideChain::get_genesis_info(hash& id, uint64_t& timestamp, uint64_t& height) const
+{
+	ReadLock lock(m_sidechainLock);
+
+	auto it = m_blocksByHeight.find(0);
+	if (it == m_blocksByHeight.end() || it->second.empty()) {
+		return false;
+	}
+
+	const PoolBlock* genesis = it->second.front();
+	id = genesis->m_sidechainId;
+	timestamp = genesis->m_timestamp;
+	height = genesis->m_txinGenHeight;
+	return true;
 }
 
 bool SideChain::load_config(const std::string& filename)

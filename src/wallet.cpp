@@ -21,6 +21,7 @@
 #include "common.h"
 #include "wallet.h"
 #include "keccak.h"
+#include "carrot_crypto.h"
 #include "crypto.h"
 #include <ios>
 
@@ -375,6 +376,48 @@ bool Wallet::torsion_check() const
 		!fcmp_pp::mul8_is_identity(p2) &&
 		fcmp_pp::torsion_check_vartime(p1) &&
 		fcmp_pp::torsion_check_vartime(p2);
+}
+
+bool Wallet::get_eph_public_key_carrot(const hash& tx_key_seed, uint64_t height, size_t output_index, uint64_t amount, hash& eph_public_key, uint8_t& view_tag) const
+{
+    (void)output_index;  // Not used - anchor derived from spend pubkey, not position
+
+    // 1. Build input_context from height
+    uint8_t input_context[33];
+    carrot::make_input_context_coinbase(height, input_context);
+
+    // 2. Derive anchor from wallet's spend public key (position-independent)
+    uint8_t anchor[16];
+    carrot::derive_deterministic_anchor_from_pubkey(tx_key_seed, m_spendPublicKey, anchor);
+
+    // 3. Derive per-output ephemeral private key d_e from anchor
+    static const uint8_t null_payment_id[8] = {0};
+    hash ephemeral_privkey;
+    carrot::make_ephemeral_privkey(anchor, input_context, m_spendPublicKey, null_payment_id, ephemeral_privkey);
+
+    // 4. Derive ephemeral public key D_e = d_e * B
+    hash ephemeral_pubkey;
+    carrot::make_ephemeral_pubkey_mainaddress(ephemeral_privkey, ephemeral_pubkey);
+
+    // 5. Derive shared secret using this wallet's view pubkey
+    hash shared_secret;
+    if (!carrot::make_shared_secret_sender(ephemeral_privkey, m_viewPublicKey, shared_secret)) {
+        return false;
+    }
+
+    // 6. Derive sender-receiver secret
+    hash sender_receiver_secret;
+    carrot::make_sender_receiver_secret(shared_secret, ephemeral_pubkey, input_context, sender_receiver_secret);
+
+    // 7. Derive onetime address K_o
+    carrot::make_onetime_address_coinbase(m_spendPublicKey, sender_receiver_secret, amount, eph_public_key);
+
+    // 8. Derive view tag
+    uint8_t view_tag_full[3];
+    carrot::make_view_tag(shared_secret, input_context, eph_public_key, view_tag_full);
+    view_tag = view_tag_full[0];
+
+    return true;
 }
 
 } // namespace p2pool

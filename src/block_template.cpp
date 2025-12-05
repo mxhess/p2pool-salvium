@@ -383,6 +383,11 @@ void BlockTemplate::update(const MinerData& data, const Mempool& mempool, const 
 		return;
 	}
 
+        // DEBUG: Show share/reward assignment
+        for (size_t i = 0; i < m_shares.size(); ++i) {
+            LOGINFO(1, "BlockTemplate share[" << i << "]: spend_key=" << m_shares[i].m_wallet->spend_public_key() << " weight=" << m_shares[i].m_weight << " reward=" << m_rewards[i]);
+        }
+
 	auto get_reward_amounts_weight = [this]() {
 		return std::accumulate(m_rewards.begin(), m_rewards.end(), 0ULL,
 			[](uint64_t a, uint64_t b)
@@ -949,6 +954,8 @@ void BlockTemplate::select_mempool_transactions(const Mempool& mempool)
 	b->m_transactions.resize(1);
 	b->m_ephPublicKeys.clear();
 	b->m_outputAmounts.clear();
+        b->m_viewTags.clear();
+        b->m_encryptedAnchors.clear();
 
 	// Block template size without coinbase outputs and transactions (minus 2 bytes for output and tx count dummy varints)
 	size_t k = b->serialize_mainchain_data().size() + b->serialize_sidechain_data().size() - 2;
@@ -974,6 +981,7 @@ void BlockTemplate::select_mempool_transactions(const Mempool& mempool)
 
 	if (max_transactions == 0) {
 		m_mempoolTxs.clear();
+                
 	}
 	else if (m_mempoolTxs.size() > max_transactions) {
 		std::nth_element(m_mempoolTxs.begin(), m_mempoolTxs.begin() + max_transactions, m_mempoolTxs.end());
@@ -1003,6 +1011,8 @@ int BlockTemplate::create_miner_tx(const MinerData& data, const std::vector<Mine
 
         m_poolBlockTemplate->m_ephPublicKeys.clear();
         m_poolBlockTemplate->m_outputAmounts.clear();
+        m_poolBlockTemplate->m_viewTags.clear();
+        m_poolBlockTemplate->m_encryptedAnchors.clear();
         m_poolBlockTemplate->m_ephPublicKeys.reserve(num_outputs);
         m_poolBlockTemplate->m_outputAmounts.reserve(num_outputs);
 
@@ -1012,96 +1022,129 @@ int BlockTemplate::create_miner_tx(const MinerData& data, const std::vector<Mine
         uint8_t input_context[33];
         carrot::make_input_context_coinbase(data.height, input_context);
 
-        uint8_t null_payment_id[8] = {0};
+        // Null payment ID for main addresses
+        static const uint8_t null_payment_id[8] = {0};
 
+        // Structure for Carrot output with pre-computed K_o
+        struct CarrotOutput {
+            size_t share_index;         // Original index into shares/m_rewards
+            uint64_t amount;
+            hash onetime_address;       // K_o
+            hash eph_pubkey;            // D_e (per-output ephemeral pubkey)
+            uint8_t view_tag[3];
+            uint8_t encrypted_anchor[16];
+        };
+        std::vector<CarrotOutput> outputs;
+        outputs.reserve(num_outputs);
+
+        // Generate all outputs using single D_e, position-independent K_o
         for (size_t i = 0; i < num_outputs; ++i) {
-                // Amount (not encrypted for coinbase)
-                writeVarint(m_rewards[i], [this, &reward_amounts_weight](uint8_t b) {
-                        m_minerTx.push_back(b);
-                        ++reward_amounts_weight;
-                });
+            CarrotOutput out;
+            out.share_index = i;
+            out.amount = m_rewards[i];
+            memset(out.onetime_address.h, 0, HASH_SIZE);
+            memset(out.eph_pubkey.h, 0, HASH_SIZE);
+            memset(out.view_tag, 0, 3);
+            memset(out.encrypted_anchor, 0, 16);
 
-                // txout_to_carrot_v1 structure
-                m_minerTx.push_back(TXOUT_TO_CARROT_V1);  // variant tag = 4
+            if (!dry_run) {
+                // Derive anchor from wallet's spend public key (position-independent)
+                uint8_t anchor[16];
+                carrot::derive_deterministic_anchor_from_pubkey(
+                    m_poolBlockTemplate->m_txkeySecSeed,
+                    shares[i].m_wallet->spend_public_key(),
+                    anchor);
 
-                // K_o - onetime address (32 bytes)
-                hash onetime_address;
-                hash ephemeral_pubkey;
-                uint8_t view_tag[3] = {0};
-                uint8_t encrypted_anchor[16] = {0};
-                        
-                if (!dry_run) {
-                        // Generate janus anchor (randomness for this output)
-                        uint8_t anchor[16];
-                        carrot::generate_janus_anchor(anchor);
-                                
-                        // Generate ephemeral private key
-                        hash ephemeral_privkey;
-                        carrot::make_ephemeral_privkey(
-                            anchor,
-                            input_context,
-                            shares[i].m_wallet->spend_public_key(),
-                            null_payment_id,
-                            ephemeral_privkey);
-                                
-                        // Generate ephemeral public key D_e
-                        carrot::make_ephemeral_pubkey_mainaddress(ephemeral_privkey, ephemeral_pubkey);
-                                
-                        // Generate shared secret (sender-side ECDH)
-                        hash shared_secret_unctx;
-                        if (!carrot::make_shared_secret_sender(
-                                ephemeral_privkey,
-                                shares[i].m_wallet->view_public_key(),
-                                shared_secret_unctx)) {
-                            LOGERR(1, "Failed to generate shared secret for output " << i);
-                            return -4;
-                        }
-                                
-                        // Generate contextualized sender-receiver secret
-                        hash sender_receiver_secret;
-                        carrot::make_sender_receiver_secret(
-                            shared_secret_unctx,
-                            ephemeral_pubkey,
-                            input_context,
-                            sender_receiver_secret);
-                        
-                        // Generate onetime address K_o
-                        carrot::make_onetime_address_coinbase(
-                            shares[i].m_wallet->spend_public_key(),
-                            sender_receiver_secret,
-                            m_rewards[i],
-                            onetime_address);
-                        
-                        // Generate 3-byte view tag
-                        carrot::make_view_tag(shared_secret_unctx, input_context, onetime_address, view_tag);
-                                
-                        // Encrypt janus anchor
-                        carrot::encrypt_anchor(anchor, sender_receiver_secret, onetime_address, encrypted_anchor);
-                        
-                        // Save for pool block template
-                        m_poolBlockTemplate->m_ephPublicKeys.emplace_back(ephemeral_pubkey);
-                        m_poolBlockTemplate->m_outputAmounts.emplace_back(m_rewards[i], view_tag[0]);
+                // Derive per-output ephemeral private key d_e from anchor
+                hash eph_privkey;
+                carrot::make_ephemeral_privkey(
+                    anchor,
+                    input_context,
+                    shares[i].m_wallet->spend_public_key(),
+                    null_payment_id,
+                    eph_privkey);
 
-                        // Save view_tag and encrypted_anchor for later
-                        std::vector<uint8_t> vt(view_tag, view_tag + 3);
-                        std::vector<uint8_t> ea(encrypted_anchor, encrypted_anchor + 16);
-                        m_poolBlockTemplate->m_viewTags.push_back(vt);
-                        m_poolBlockTemplate->m_encryptedAnchors.push_back(ea);
+                // Derive per-output ephemeral public key D_e = d_e * B
+                carrot::make_ephemeral_pubkey_mainaddress(eph_privkey, out.eph_pubkey);
+
+                // Generate shared secret using per-output d_e
+                hash shared_secret_unctx;
+                if (!carrot::make_shared_secret_sender(
+                        eph_privkey,
+                        shares[i].m_wallet->view_public_key(),
+                        shared_secret_unctx)) {
+                    LOGERR(1, "Failed to generate shared secret for output " << i);
+                    return -4;
                 }
 
-                // Write output data (zeros for dry_run, real values otherwise)
-                m_minerTx.insert(m_minerTx.end(), onetime_address.h, onetime_address.h + HASH_SIZE);
+                // Generate sender-receiver secret using per-output D_e
+                hash sender_receiver_secret;
+                carrot::make_sender_receiver_secret(
+                    shared_secret_unctx,
+                    out.eph_pubkey,
+                    input_context,
+                    sender_receiver_secret);
 
-                // asset_type - string "SAL1"
-                m_minerTx.push_back(4);  // string length
+                // Generate onetime address K_o
+                carrot::make_onetime_address_coinbase(
+                    shares[i].m_wallet->spend_public_key(),
+                    sender_receiver_secret,
+                    out.amount,
+                    out.onetime_address);
+
+                // Generate 3-byte view tag
+                carrot::make_view_tag(shared_secret_unctx, input_context, out.onetime_address, out.view_tag);
+
+                // Encrypt anchor
+                carrot::encrypt_anchor(anchor, sender_receiver_secret, out.onetime_address, out.encrypted_anchor);
+            }
+            outputs.push_back(out);
+        }
+
+        // Sort outputs by K_o (required by Salvium daemon)
+        std::sort(outputs.begin(), outputs.end(),
+            [](const CarrotOutput& a, const CarrotOutput& b) {
+                return memcmp(a.onetime_address.h, b.onetime_address.h, HASH_SIZE) < 0;
+            });
+
+        // Write sorted outputs to miner tx (single D_e used for all)
+        for (const auto& out : outputs) {
+            // Amount
+            writeVarint(out.amount, [this, &reward_amounts_weight](uint8_t b) {
+                m_minerTx.push_back(b);
+                ++reward_amounts_weight;
+            });
+
+            // txout_to_carrot_v1
+            m_minerTx.push_back(TXOUT_TO_CARROT_V1);
+
+            if (dry_run) {
+                m_minerTx.insert(m_minerTx.end(), HASH_SIZE, 0);
+                m_minerTx.push_back(4);
                 m_minerTx.push_back('S');
                 m_minerTx.push_back('A');
                 m_minerTx.push_back('L');
                 m_minerTx.push_back('1');
+                m_minerTx.insert(m_minerTx.end(), 3, 0);
+                m_minerTx.insert(m_minerTx.end(), 16, 0);
+            } else {
+                m_minerTx.insert(m_minerTx.end(), out.onetime_address.h, out.onetime_address.h + HASH_SIZE);
+                m_minerTx.push_back(4);
+                m_minerTx.push_back('S');
+                m_minerTx.push_back('A');
+                m_minerTx.push_back('L');
+                m_minerTx.push_back('1');
+                m_minerTx.insert(m_minerTx.end(), out.view_tag, out.view_tag + 3);
+                m_minerTx.insert(m_minerTx.end(), out.encrypted_anchor, out.encrypted_anchor + 16);
 
-                // view_tag and encrypted_anchor
-                m_minerTx.insert(m_minerTx.end(), view_tag, view_tag + 3);
-                m_minerTx.insert(m_minerTx.end(), encrypted_anchor, encrypted_anchor + 16);
+                // Save for pool block template
+                m_poolBlockTemplate->m_ephPublicKeys.emplace_back(out.onetime_address);
+                m_poolBlockTemplate->m_outputAmounts.emplace_back(out.amount, out.view_tag[0]);
+                std::vector<uint8_t> vt(out.view_tag, out.view_tag + 3);
+                std::vector<uint8_t> ea(out.encrypted_anchor, out.encrypted_anchor + 16);
+                m_poolBlockTemplate->m_viewTags.push_back(vt);
+                m_poolBlockTemplate->m_encryptedAnchors.push_back(ea);
+            }
         }
 
         if (dry_run) {
@@ -1114,19 +1157,40 @@ int BlockTemplate::create_miner_tx(const MinerData& data, const std::vector<Mine
                 return -2;
         }
 
-        // TX_EXTRA
-        LOGINFO(3, "DEBUG: Carrot extra - major_version=" << data.major_version << ", static_cast<int>(dry_run)=" << static_cast<int>(dry_run) << ", num_eph_keys=" << m_poolBlockTemplate->m_ephPublicKeys.size());
+        // TX_EXTRA - per-output D_e for Janus protection
+        LOGINFO(3, "DEBUG: Carrot extra - major_version=" << data.major_version << ", dry_run=" << static_cast<int>(dry_run) << ", num_outputs=" << num_outputs);
         m_minerTxExtra.clear();
+        m_poolBlockTemplate->m_additionalPubKeys.clear();
 
-        // Carrot v1: TX_EXTRA contains ephemeral pubkey, extra_nonce, and merge mining tag
-        // Ephemeral pubkey
-        m_minerTxExtra.push_back(TX_EXTRA_TAG_PUBKEY);
-        if (dry_run) {
-                m_minerTxExtra.insert(m_minerTxExtra.end(), HASH_SIZE, 0);
+        if (num_outputs == 1) {
+                // Single output: use TX_EXTRA_TAG_PUBKEY
+                m_minerTxExtra.push_back(TX_EXTRA_TAG_PUBKEY);
+                if (dry_run) {
+                        m_minerTxExtra.insert(m_minerTxExtra.end(), HASH_SIZE, 0);
+                } else {
+                        m_poolBlockTemplate->m_txkeyPub = outputs[0].eph_pubkey;
+                        m_minerTxExtra.insert(m_minerTxExtra.end(), 
+                            outputs[0].eph_pubkey.h,
+                            outputs[0].eph_pubkey.h + HASH_SIZE);
+                }
         } else {
-                m_minerTxExtra.insert(m_minerTxExtra.end(), 
-                        m_poolBlockTemplate->m_ephPublicKeys[0].h,
-                        m_poolBlockTemplate->m_ephPublicKeys[0].h + HASH_SIZE);
+                // Multiple outputs: use TX_EXTRA_TAG_ADDITIONAL_PUBKEYS with ALL D_e values
+                m_minerTxExtra.push_back(TX_EXTRA_TAG_ADDITIONAL_PUBKEYS);
+                writeVarint(num_outputs, m_minerTxExtra);
+                if (dry_run) {
+                        m_minerTxExtra.insert(m_minerTxExtra.end(), num_outputs * HASH_SIZE, 0);
+                } else {
+                        // Store first D_e in m_txkeyPub for compatibility
+                        m_poolBlockTemplate->m_txkeyPub = outputs[0].eph_pubkey;
+                        for (size_t i = 0; i < num_outputs; ++i) {
+                                m_minerTxExtra.insert(m_minerTxExtra.end(),
+                                    outputs[i].eph_pubkey.h,
+                                    outputs[i].eph_pubkey.h + HASH_SIZE);
+                                if (i > 0) {
+                                        m_poolBlockTemplate->m_additionalPubKeys.push_back(outputs[i].eph_pubkey);
+                                }
+                        }
+                }
         }
 
         // Extra nonce
@@ -1165,6 +1229,7 @@ int BlockTemplate::create_miner_tx(const MinerData& data, const std::vector<Mine
         }
         uint64_t stake_amount = full_block_reward / 5;
         writeVarint(stake_amount, m_minerTx);
+        m_poolBlockTemplate->m_amountBurnt = stake_amount;
 
         // Save prefix size - everything up to here is the transaction prefix
         m_minerTxPrefixSize = static_cast<uint32_t>(m_minerTx.size());

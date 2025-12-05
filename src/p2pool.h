@@ -49,7 +49,7 @@ public:
 	void stop();
 
 	const Params& params() const { return *m_params; }
-        bool in_donation_mode();
+        bool in_donation_mode(uint64_t height);
 	BlockTemplate& block_template() { return *m_blockTemplate; }
 	SideChain& side_chain() { return *m_sideChain; }
 

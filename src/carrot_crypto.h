@@ -61,6 +61,23 @@ void encrypt_anchor(
     const hash& onetime_address,
     uint8_t (&encrypted_anchor)[16]);
 
+// Derive deterministic anchor for P2Pool validation
+void derive_deterministic_anchor(
+    const hash& tx_key_seed,
+    uint32_t output_index,
+    uint8_t (&anchor)[16]);
+
+// Derive deterministic anchor from wallet spend public key (position-independent)
+void derive_deterministic_anchor_from_pubkey(
+    const hash& tx_key_seed,
+    const hash& spend_public_key,
+    uint8_t (&anchor)[16]);
+
+void derive_transaction_ephemeral_privkey(
+    const hash& tx_key_seed,
+    const uint8_t (&input_context)[33],
+    hash& ephemeral_privkey_out);
+
 } // namespace carrot
 } // namespace p2pool
 

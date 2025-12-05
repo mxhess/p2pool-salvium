@@ -23,6 +23,7 @@
 #include "protocol_tx_hash.h"
 #include "crypto.h"
 #include "merkle.h"
+#include <sstream>
 
 LOG_CATEGORY(PoolBlock)
 
@@ -93,7 +94,11 @@ PoolBlock& PoolBlock::operator=(const PoolBlock& b)
 	m_txinGenHeight = b.m_txinGenHeight;
 	m_ephPublicKeys = b.m_ephPublicKeys;
 	m_outputAmounts = b.m_outputAmounts;
+        m_viewTags = b.m_viewTags;
+        m_encryptedAnchors = b.m_encryptedAnchors;
+        m_amountBurnt = b.m_amountBurnt;
 	m_txkeyPub = b.m_txkeyPub;
+        m_additionalPubKeys = b.m_additionalPubKeys;
 	m_extraNonceSize = b.m_extraNonceSize;
 	m_extraNonce = b.m_extraNonce;
 	m_merkleTreeDataSize = b.m_merkleTreeDataSize;
@@ -138,7 +143,7 @@ PoolBlock& PoolBlock::operator=(const PoolBlock& b)
 	return *this;
 }
 
-std::vector<uint8_t> PoolBlock::serialize_mainchain_data(size_t* header_size, size_t* miner_tx_size, int* outputs_offset, int* outputs_blob_size, const uint32_t* nonce, const uint32_t* extra_nonce) const
+std::vector<uint8_t> PoolBlock::serialize_mainchain_data(size_t* header_size, size_t* miner_tx_size, int* outputs_offset, int* outputs_blob_size, const uint32_t* nonce, const uint32_t* extra_nonce, bool include_tx_hashes) const
 {
 	std::vector<uint8_t> data;
 	data.reserve(std::min<size_t>(128 + m_outputAmounts.size() * 39 + m_transactions.size() * HASH_SIZE, 131072));
@@ -173,26 +178,52 @@ std::vector<uint8_t> PoolBlock::serialize_mainchain_data(size_t* header_size, si
 
 	writeVarint(m_outputAmounts.size(), data);
 
-	for (size_t i = 0, n = m_outputAmounts.size(); i < n; ++i) {
-		const TxOutput& output = m_outputAmounts[i];
+        LOGINFO(0, "DEBUG serialize: numOutputs=" << m_outputAmounts.size() << " numEphKeys=" << m_ephPublicKeys.size() << " numViewTags=" << m_viewTags.size() << " numEncAnchors=" << m_encryptedAnchors.size() << " sidechainHeight=" << m_sidechainHeight);
 
-		writeVarint(output.m_reward, data);
-		data.push_back(TXOUT_TO_TAGGED_KEY);
-		const hash h = m_ephPublicKeys[i];
-		data.insert(data.end(), h.h, h.h + HASH_SIZE);
-		data.push_back(static_cast<uint8_t>(output.m_viewTag));
-	}
+        for (size_t i = 0, n = m_outputAmounts.size(); i < n; ++i) {
+            const TxOutput& output = m_outputAmounts[i];
+
+            writeVarint(output.m_reward, data);
+            data.push_back(TXOUT_TO_CARROT_V1);
+            const hash h = m_ephPublicKeys[i];
+            data.insert(data.end(), h.h, h.h + HASH_SIZE);
+    
+            // Carrot v1: asset_len + "SAL1" + 3-byte view_tag + 16-byte encrypted_anchor
+            data.push_back(4);
+            data.push_back('S');
+            data.push_back('A');
+            data.push_back('L');
+            data.push_back('1');
+            data.insert(data.end(), m_viewTags[i].begin(), m_viewTags[i].end());
+            data.insert(data.end(), m_encryptedAnchors[i].begin(), m_encryptedAnchors[i].end());
+        }
 
 	if (outputs_blob_size) {
 		*outputs_blob_size = static_cast<int>(data.size()) - outputs_offset0;
 	}
 
-	uint8_t tx_extra[128];
-	uint8_t* p = tx_extra;
+        std::vector<uint8_t> tx_extra(128 + (1 + m_additionalPubKeys.size()) * HASH_SIZE);
+        uint8_t* p = tx_extra.data();
 
-	*(p++) = TX_EXTRA_TAG_PUBKEY;
-	memcpy(p, m_txkeyPub.h, HASH_SIZE);
-	p += HASH_SIZE;
+        if (m_additionalPubKeys.empty()) {
+                // Single output: use TX_EXTRA_TAG_PUBKEY
+                *(p++) = TX_EXTRA_TAG_PUBKEY;
+                memcpy(p, m_txkeyPub.h, HASH_SIZE);
+                p += HASH_SIZE;
+        } else {
+                // Multiple outputs: TX_EXTRA_TAG_ADDITIONAL_PUBKEYS with ALL D_e values
+                *(p++) = TX_EXTRA_TAG_ADDITIONAL_PUBKEYS;
+                size_t total_pubkeys = 1 + m_additionalPubKeys.size();
+                writeVarint(total_pubkeys, [&p](uint8_t b) { *(p++) = b; });
+                // First D_e (stored in m_txkeyPub)
+                memcpy(p, m_txkeyPub.h, HASH_SIZE);
+                p += HASH_SIZE;
+                // Remaining D_e values
+                for (const auto& pk : m_additionalPubKeys) {
+                        memcpy(p, pk.h, HASH_SIZE);
+                        p += HASH_SIZE;
+                }
+        }
 
 	uint64_t extra_nonce_size = m_extraNonceSize;
 	if (extra_nonce_size > EXTRA_NONCE_MAX_SIZE) {
@@ -220,21 +251,15 @@ std::vector<uint8_t> PoolBlock::serialize_mainchain_data(size_t* header_size, si
 	memcpy(p, m_merkleRoot.h, HASH_SIZE);
 	p += HASH_SIZE;
 
-        writeVarint(static_cast<size_t>(p - tx_extra), data);
-        data.insert(data.end(), tx_extra, p);
+        writeVarint(static_cast<size_t>(p - tx_extra.data()), data);
+        data.insert(data.end(), tx_extra.data(), p);
 
         // For Carrot v1+ (major_version >= 10), add type and amount_burnt instead of vin_rct_type
         if (m_majorVersion >= 10) {
             // type = MINER
             writeVarint(1, data);
     
-            // amount_burnt = 20% of total reward
-            uint64_t miner_total = 0;
-            for (const TxOutput& output : m_outputAmounts) {
-                miner_total += output.m_reward;
-            }
-            uint64_t stake_amount = miner_total / 4;
-            writeVarint(stake_amount, data);
+            writeVarint(m_amountBurnt, data);
 
             data.push_back(0);
 
@@ -275,17 +300,18 @@ std::vector<uint8_t> PoolBlock::serialize_mainchain_data(size_t* header_size, si
                 calculate_protocol_tx_hash(m_txinGenHeight, protocol_tx_hash);
                 LOGINFO(3, "Sidechain protocol TX hash: " << protocol_tx_hash);
         }
-        writeVarint(m_transactions.size() - 1, data);
-
+        if (include_tx_hashes) {
+		writeVarint(m_transactions.size() - 1, data);
 #ifdef WITH_INDEXED_HASHES
-	for (size_t i = 1, n = m_transactions.size(); i < n; ++i) {
-		const hash h = m_transactions[i];
-		data.insert(data.end(), h.h, h.h + HASH_SIZE);
-	}
+		for (size_t i = 1, n = m_transactions.size(); i < n; ++i) {
+			const hash h = m_transactions[i];
+			data.insert(data.end(), h.h, h.h + HASH_SIZE);
+		}
 #else
-	const uint8_t* t = reinterpret_cast<const uint8_t*>(m_transactions.data());
-	data.insert(data.end(), t + HASH_SIZE, t + m_transactions.size() * HASH_SIZE);
+		const uint8_t* t = reinterpret_cast<const uint8_t*>(m_transactions.data());
+		data.insert(data.end(), t + HASH_SIZE, t + m_transactions.size() * HASH_SIZE);
 #endif
+	}
 
 #if POOL_BLOCK_DEBUG
 	if ((nonce == &m_nonce) && (extra_nonce == &m_extraNonce) && !m_mainChainDataDebug.empty() && (data != m_mainChainDataDebug)) {
@@ -421,6 +447,19 @@ bool PoolBlock::get_pow_hash(RandomX_Hasher_Base* hasher, uint64_t height, const
 		memcpy(blob, mainchain_data.data(), blob_size);
 
 		const uint8_t* miner_tx = mainchain_data.data() + header_size;
+
+                // DEBUG: dump miner TX for comparison
+                LOGINFO(0, "get_pow_hash: header_size=" << header_size << " miner_tx_size=" << miner_tx_size);
+                {
+                    std::string hex_dump;
+                    for (size_t dbg_i = 0; dbg_i < std::min(miner_tx_size, size_t(160)); ++dbg_i) {
+                        char dbg_buf[4];
+                        snprintf(dbg_buf, sizeof(dbg_buf), "%02x", miner_tx[dbg_i]);
+                        hex_dump += dbg_buf;
+                    }
+                    LOGINFO(0, "miner_tx bytes: " << hex_dump);
+                }
+
 		hash tmp;
 
 		// "miner_tx_size - 1" because the last byte is 0x00 (base rct data), it goes into the second hash
@@ -431,10 +470,30 @@ bool PoolBlock::get_pow_hash(RandomX_Hasher_Base* hasher, uint64_t height, const
 
 		keccak(reinterpret_cast<uint8_t*>(hashes), HASH_SIZE * 3, tmp.h);
 
-		// Save the coinbase tx hash into the first element of m_transactions
-		m_transactions[0] = static_cast<indexed_hash>(tmp);
+                // Save the coinbase tx hash into the first element of m_transactions
+                m_transactions[0] = static_cast<indexed_hash>(tmp);
 
-		root_hash tmp_root;
+                // For Carrot v1 blocks, compute and store protocol TX hash at position 1
+                if ((m_majorVersion >= 10) && (m_transactions.size() >= 2)) {
+                        hash protocol_tx_hash;
+                        calculate_protocol_tx_hash(m_txinGenHeight, protocol_tx_hash);
+                        m_transactions[1] = static_cast<indexed_hash>(protocol_tx_hash);
+                }
+
+                // DEBUG: dump m_transactions for comparison
+                LOGINFO(0, "get_pow_hash: m_transactions.size()=" << m_transactions.size());
+                for (size_t dbg_i = 0; dbg_i < m_transactions.size(); ++dbg_i) {
+                    const hash& dbg_h = m_transactions[dbg_i];
+                    std::string hex;
+                    for (size_t j = 0; j < HASH_SIZE; ++j) {
+                        char buf[4];
+                        snprintf(buf, sizeof(buf), "%02x", dbg_h.h[j]);
+                        hex += buf;
+                    }
+                    LOGINFO(0, "get_pow_hash: m_transactions[" << dbg_i << "]=" << hex);
+                }
+
+                root_hash tmp_root;
 
 #ifdef WITH_INDEXED_HASHES
 		std::vector<hash> transactions;
@@ -463,19 +522,29 @@ bool PoolBlock::get_pow_hash(RandomX_Hasher_Base* hasher, uint64_t height, const
 
 uint64_t PoolBlock::get_payout(const Wallet& w) const
 {
-	for (size_t i = 0, n = m_outputAmounts.size(); i < n; ++i) {
-		const TxOutput& out = m_outputAmounts[i];
-
-		hash eph_public_key;
-
-		uint8_t view_tag;
-		const uint8_t expected_view_tag = out.m_viewTag;
-		if (w.get_eph_public_key(m_txkeySec, i, eph_public_key, view_tag, &expected_view_tag) && (m_ephPublicKeys[i] == eph_public_key)) {
-			return out.m_reward;
-		}
-	}
-
-	return 0;
+    const hash tx_key_seed = m_txkeySecSeed;
+    
+    LOGINFO(3, "get_payout: checking " << m_outputAmounts.size() << " outputs, tx_key_seed=" << tx_key_seed);
+    
+    for (size_t i = 0, n = m_outputAmounts.size(); i < n; ++i) {
+        const TxOutput& out = m_outputAmounts[i];
+        hash eph_public_key;
+        uint8_t view_tag;
+        
+        const bool derived = w.get_eph_public_key_carrot(tx_key_seed, m_txinGenHeight, i, out.m_reward, eph_public_key, view_tag);
+        const bool match = (m_ephPublicKeys[i] == eph_public_key);
+        
+        LOGINFO(3, "get_payout: output " << i << " reward=" << out.m_reward 
+            << " derived=" << (derived ? 1 : 0)
+            << " expected=" << m_ephPublicKeys[i] 
+            << " got=" << eph_public_key
+            << " match=" << (match ? 1 : 0));
+        
+        if (derived && match) {
+            return out.m_reward;
+        }
+    }
+    return 0;
 }
 
 hash PoolBlock::calculate_tx_key_seed() const
@@ -483,8 +552,19 @@ hash PoolBlock::calculate_tx_key_seed() const
 	const char domain[] = "tx_key_seed";
 	const uint32_t zero = 0;
 
-	const std::vector<uint8_t> mainchain_data = serialize_mainchain_data(nullptr, nullptr, nullptr, nullptr, &zero, &zero);
+        // For Carrot v1 (v10+), exclude transaction hashes for canonical serialization
+	// The tx list differs between local creation and P2P reception
+	const bool include_tx_hashes = (m_majorVersion < 10);
+	const std::vector<uint8_t> mainchain_data = serialize_mainchain_data(nullptr, nullptr, nullptr, nullptr, &zero, &zero, include_tx_hashes);
 	const std::vector<uint8_t> sidechain_data = serialize_sidechain_data();
+
+        // DEBUG: Log sizes for tx_key_seed comparison
+        LOGINFO(3, "calculate_tx_key_seed: height=" << m_sidechainHeight 
+                << " mainchain_size=" << mainchain_data.size() 
+                << " sidechain_size=" << sidechain_data.size()
+                << " m_transactions.size=" << m_transactions.size()
+                << " m_viewTags.size=" << m_viewTags.size()
+                << " m_encryptedAnchors.size=" << m_encryptedAnchors.size());
 
 	hash result;
 	keccak_custom([&domain, &mainchain_data, &sidechain_data](int offset) -> uint8_t {

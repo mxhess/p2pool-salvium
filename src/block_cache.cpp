@@ -20,6 +20,7 @@
 #include "pool_block.h"
 #include "p2p_server.h"
 #include "side_chain.h"
+#include <fstream>
 
 LOG_CATEGORY(BlockCache)
 
@@ -27,6 +28,7 @@ static constexpr uint32_t BLOCK_SIZE = 96 * 1024;
 static constexpr uint32_t NUM_BLOCKS = 4608;
 static constexpr uint32_t CACHE_SIZE = BLOCK_SIZE * NUM_BLOCKS;
 static constexpr char cache_name[] = "p2pool.cache";
+static const uint64_t CACHE_VERSION = std::hash<std::string>{}(__DATE__ __TIME__);
 
 namespace p2pool {
 
@@ -191,14 +193,33 @@ void BlockCache::store(const PoolBlock& block)
 
 void BlockCache::load_all(const SideChain& side_chain, P2PServer& server)
 {
-	if (!m_impl->m_data) {
-		return;
-	}
+        // Check cache version - invalidates on recompile
+        const std::string version_path = DATA_DIR + "p2pool.cache.version";
+        bool version_ok = false;
+        {
+                std::ifstream f(version_path);
+                uint64_t v = 0;
+                if ((f >> v) && (v == CACHE_VERSION)) {
+                        version_ok = true;
+                }
+        }
+        if (!version_ok) {
+                LOGINFO(1, "cache version mismatch (recompiled binary), clearing cache");
+                if (m_impl->m_data) {
+                        memset(m_impl->m_data, 0, CACHE_SIZE);
+                }
+                std::ofstream f(version_path);
+                f << CACHE_VERSION;
+        }
 
-	// Can be only called once
-	if (m_loadingStarted.exchange(1)) {
-		return;
-	}
+        if (!m_impl->m_data) {
+                return;
+        }
+
+        // Can be only called once
+        if (m_loadingStarted.exchange(1)) {
+                return;
+        }
 
 	LOGINFO(1, "loading cached blocks");
 

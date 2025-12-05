@@ -351,20 +351,10 @@ void p2pool::print_hosts() const
 	}
 }
 
-bool p2pool::in_donation_mode()
+bool p2pool::in_donation_mode(uint64_t height)
 {
-	const PoolBlock* tip = m_sideChain->chainTip();
-	if (!tip) {
-		return false;
-	}
-	
-	// Check the NEXT block height (the one being created), not current tip
-	const uint64_t next_height = tip->m_sidechainHeight + 1;
-	
-	// Donate every 100th block (blocks 100, 200, 300, etc.)
-	const uint64_t cycle_length = 100;
-	
-	return (next_height % cycle_length) == 0;
+    const uint64_t cycle_length = (SideChain::network_type() == NetworkType::Mainnet) ? DONATION_CYCLE_MAINNET : DONATION_CYCLE_TESTNET;
+    return (height % cycle_length) == 0;
 }
 
 bool p2pool::calculate_hash(const void* data, size_t size, uint64_t height, const hash& seed, hash& result, bool force_light_mode)
@@ -1290,7 +1280,7 @@ void p2pool::update_block_template()
 	if (m_updateSeed.exchange(false)) {
 		m_hasher->set_seed_async(data.seed_hash);
 	}
-	m_blockTemplate->update(data, *m_mempool, m_params, in_donation_mode());
+        m_blockTemplate->update(data, *m_mempool, m_params, in_donation_mode(data.height));
 	stratum_on_block();
 	api_update_pool_stats();
 

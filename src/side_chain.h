@@ -24,6 +24,13 @@
 
 namespace p2pool {
 
+// ============================================================
+// PROTOCOL_VERSION - INCREMENT THIS ON CONSENSUS-BREAKING CHANGES
+// Examples: serialization format, validation rules, payout calculation
+// Do NOT increment for: bug fixes, logging, performance changes
+// ============================================================
+static constexpr uint32_t PROTOCOL_VERSION = 1;
+
 class p2pool;
 class P2PServer;
 
@@ -56,6 +63,10 @@ public:
 	[[nodiscard]] const PoolBlock* find_block(const hash& id) const;
 	[[nodiscard]] const PoolBlock* find_block_by_merkle_root(const root_hash& merkle_root) const;
 	void watch_mainchain_block(const ChainMain& data, const hash& possible_merkle_root);
+
+        bool consider_peer_genesis(const hash& genesis_id, uint64_t timestamp, uint64_t height);
+        bool get_genesis_info(hash& id, uint64_t& timestamp, uint64_t& height) const;
+        void purge_sidechain();
 
 	[[nodiscard]] const PoolBlock* get_block_blob(const hash& id, std::vector<uint8_t>& blob) const;
 	[[nodiscard]] bool get_outputs_blob(PoolBlock* block, uint64_t total_reward, std::vector<uint8_t>& blob, uv_loop_t* loop) const;
@@ -121,7 +132,15 @@ private:
 	void prune_seen_data();
 
 	mutable uv_rwlock_t m_sidechainLock;
-	std::atomic<PoolBlock*> m_chainTip;
+        std::atomic<PoolBlock*> m_chainTip;
+
+	// Genesis reconciliation
+	mutable std::atomic<bool> m_genesisDecisionMade{ false };
+	mutable hash m_adoptedGenesisId;
+	mutable uint64_t m_adoptedGenesisTimestamp{ 0 };
+	mutable uint64_t m_adoptedGenesisHeight{ 0 };
+        mutable uint64_t m_adoptedGenesisTime{ 0 };
+
 	std::map<uint64_t, std::vector<PoolBlock*>> m_blocksByHeight;
 	unordered_map<hash, PoolBlock*> m_blocksById;
 	unordered_map<root_hash, PoolBlock*> m_blocksByMerkleRoot;
@@ -167,6 +186,10 @@ private:
 #ifdef DEV_TEST_SYNC
 	uint64_t m_firstPruneTime;
 #endif
+
+        // Divergence detection
+        static constexpr uint32_t DIVERGENCE_THRESHOLD = 20;
+        uint32_t m_externalBlockFailures;
 
 	hash m_consensusHash;
 

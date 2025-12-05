@@ -46,6 +46,7 @@ public:
 	}
 
 	[[nodiscard]] bool get_eph_public_key(const hash& txkey_sec, size_t output_index, hash& eph_public_key, uint8_t& view_tag, const uint8_t* expected_view_tag = nullptr) const;
+        [[nodiscard]] bool get_eph_public_key_carrot(const hash& tx_key_seed, uint64_t height, size_t output_index, uint64_t amount, hash& eph_public_key, uint8_t& view_tag) const;
 
 	FORCEINLINE bool operator<(const Wallet& w) const { return (m_spendPublicKey < w.m_spendPublicKey) || ((m_spendPublicKey == w.m_spendPublicKey) && (m_viewPublicKey < w.m_viewPublicKey)); }
 	FORCEINLINE bool operator==(const Wallet& w) const { return (m_spendPublicKey == w.m_spendPublicKey) && (m_viewPublicKey == w.m_viewPublicKey); }

@@ -161,6 +161,31 @@ P2PServer::P2PServer(p2pool* pool)
 		WriteLock lock(m_cachedBlocksLock);
 		m_cache->load_all(m_pool->side_chain(), *this);
 		m_cacheLoaded = true;
+
+                // Bootstrap sidechain from cache - add blocks in height order
+                if (m_cachedBlocks && !m_cachedBlocks->empty()) {
+                        LOGINFO(1, "bootstrapping sidechain from " << m_cachedBlocks->size() << " cached blocks");
+                        
+                        // Collect and sort by height ascending
+                        std::vector<PoolBlock*> sorted_blocks;
+                        sorted_blocks.reserve(m_cachedBlocks->size());
+                        for (const auto& it : *m_cachedBlocks) {
+                                sorted_blocks.push_back(it.second);
+                        }
+                        std::sort(sorted_blocks.begin(), sorted_blocks.end(),
+                                [](const PoolBlock* a, const PoolBlock* b) {
+                                        return a->m_sidechainHeight < b->m_sidechainHeight;
+                                });
+                        
+                        // Add in height order so parents exist before children
+                        std::vector<hash> missing;
+                        for (PoolBlock* block : sorted_blocks) {
+                                (void)m_pool->side_chain().add_external_block(*block, missing);
+                        }
+                        
+                        LOGINFO(1, "cache bootstrap complete, chain tip height = " << 
+                                (m_pool->side_chain().chainTip() ? m_pool->side_chain().chainTip()->m_sidechainHeight : 0));
+                }
 	}
 
 	m_timer.data = this;
@@ -1004,6 +1029,11 @@ P2PServer::Broadcast::Broadcast(const PoolBlock& block, const PoolBlock* parent)
 
 	data->pruned_blob.insert(data->pruned_blob.end(), sidechain_data.begin(), sidechain_data.end());
 
+	// Carrot v1 blocks have encrypted anchors that can't be deterministically reconstructed
+	// Force full blob broadcasts by clearing pruned/compact blobs
+	data->pruned_blob.clear();
+	data->compact_blob.clear();
+
 	data->ancestor_hashes.reserve(block.m_uncles.size() + 1);
 	data->ancestor_hashes = block.m_uncles;
 	data->ancestor_hashes.push_back(block.m_parent);
@@ -1122,7 +1152,7 @@ void P2PServer::on_broadcast()
 					return p - buf;
 				}
 
-				bool send_pruned = true;
+				bool send_pruned = !data->pruned_blob.empty();
 				bool send_compact = (client->m_protocolVersion >= PROTOCOL_VERSION_1_1) && !data->compact_blob.empty() && (data->compact_blob.size() < data->pruned_blob.size());
 
 				for (const hash& id : data->ancestor_hashes) {
@@ -2221,6 +2251,17 @@ bool P2PServer::P2PClient::on_read(const char* data, uint32_t size)
 				}
 			}
 			break;
+
+                case MessageId::GENESIS_INFO:
+			LOGINFO(5, "peer " << log::Gray() << static_cast<char*>(m_addrString) << log::NoColor() << " sent GENESIS_INFO");
+                        if (bytes_left >= 1 + HASH_SIZE + sizeof(uint64_t) + sizeof(uint64_t) + sizeof(uint32_t)) {
+				bytes_read = 1 + HASH_SIZE + sizeof(uint64_t) + sizeof(uint64_t) + sizeof(uint32_t);
+				if (!on_genesis_info(buf + 1)) {
+					return false;
+				}
+			}
+			break;
+
 		}
 
 		if (bytes_read) {
@@ -2579,6 +2620,23 @@ void P2PServer::P2PClient::on_after_handshake(uint8_t* &p)
 
 	m_blockPendingRequests.push_back(0);
 	m_lastBroadcastTimestamp = seconds_since_epoch();
+
+	// Send our genesis info for chain reconciliation
+	hash genesis_id;
+	uint64_t genesis_timestamp, genesis_height;
+	if (static_cast<P2PServer*>(m_owner)->m_pool->side_chain().get_genesis_info(genesis_id, genesis_timestamp, genesis_height)) {
+                LOGINFO(5, "sending GENESIS_INFO to " << static_cast<char*>(m_addrString) << " (v" << PROTOCOL_VERSION << ")");
+		*(p++) = static_cast<uint8_t>(MessageId::GENESIS_INFO);
+		memcpy(p, genesis_id.h, HASH_SIZE);
+		p += HASH_SIZE;
+		memcpy(p, &genesis_timestamp, sizeof(uint64_t));
+		p += sizeof(uint64_t);
+		memcpy(p, &genesis_height, sizeof(uint64_t));
+		p += sizeof(uint64_t);
+		const uint32_t version = PROTOCOL_VERSION;
+		memcpy(p, &version, sizeof(uint32_t));
+		p += sizeof(uint32_t);
+	}
 }
 
 bool P2PServer::P2PClient::on_listen_port(const uint8_t* buf)
@@ -3016,6 +3074,63 @@ void P2PServer::P2PClient::on_block_notify(const uint8_t* buf)
 			m_blockPendingRequests.push_back(*id.u64());
 		}
 	}
+}
+
+bool P2PServer::P2PClient::on_genesis_info(const uint8_t* buf)
+{
+	hash peer_genesis_id;
+	memcpy(peer_genesis_id.h, buf, HASH_SIZE);
+
+	const uint64_t peer_timestamp = read_unaligned(reinterpret_cast<const uint64_t*>(buf + HASH_SIZE));
+	const uint64_t peer_height = read_unaligned(reinterpret_cast<const uint64_t*>(buf + HASH_SIZE + sizeof(uint64_t)));
+	const uint32_t peer_version = read_unaligned(reinterpret_cast<const uint32_t*>(buf + HASH_SIZE + sizeof(uint64_t) + sizeof(uint64_t)));
+
+	P2PServer* server = static_cast<P2PServer*>(m_owner);
+	SideChain& side_chain = server->m_pool->side_chain();
+
+	LOGINFO(4, "peer " << log::Gray() << static_cast<char*>(m_addrString) << log::NoColor()
+		<< " genesis: " << peer_genesis_id << " timestamp=" << peer_timestamp 
+		<< " height=" << peer_height << " version=" << peer_version);
+
+	// Check protocol version compatibility
+	if (peer_version != PROTOCOL_VERSION) {
+		if (peer_version > PROTOCOL_VERSION) {
+			LOGWARN(3, "Peer " << static_cast<char*>(m_addrString) 
+				<< " running newer protocol v" << peer_version 
+				<< " (we have v" << PROTOCOL_VERSION << "). Upgrade recommended.");
+		} else {
+			LOGWARN(3, "Peer " << static_cast<char*>(m_addrString) 
+				<< " running older protocol v" << peer_version 
+				<< " (we have v" << PROTOCOL_VERSION << "). Ignoring their genesis.");
+		}
+		return true;  // Don't fail connection, just don't adopt
+	}
+
+	if (!side_chain.consider_peer_genesis(peer_genesis_id, peer_timestamp, peer_height)) {
+		return false;
+	}
+
+	// If we don't have this block, request it
+	if (!server->find_block(peer_genesis_id)) {
+		LOGINFO(5, "Requesting genesis block " << peer_genesis_id << " from peer");
+		const bool result = server->send(this,
+			[&peer_genesis_id, this](uint8_t* buf, size_t buf_size) -> size_t
+			{
+				if (buf_size < 1 + HASH_SIZE) {
+					return 0;
+				}
+				uint8_t* p = buf;
+				*(p++) = static_cast<uint8_t>(MessageId::BLOCK_REQUEST);
+				memcpy(p, peer_genesis_id.h, HASH_SIZE);
+				p += HASH_SIZE;
+				return p - buf;
+			});
+		if (result) {
+			m_blockPendingRequests.push_back(*peer_genesis_id.u64());
+		}
+	}
+
+	return true;
 }
 
 bool P2PServer::P2PClient::on_aux_job_donation(const uint8_t* buf, uint32_t size)
@@ -3491,20 +3606,26 @@ void P2PServer::P2PClient::post_handle_incoming_block(p2pool* pool, const PoolBl
 {
 	const uint32_t new_reset_counter = m_resetCounter.load();
 
-	if (!result) {
-		// Client sent bad data, disconnect and ban it
-		if (reset_counter == new_reset_counter) {
-			close();
-			LOGWARN(3, "peer " << static_cast<char*>(m_addrString) << " banned for " << DEFAULT_BAN_TIME << " seconds");
-		}
-		else {
-			LOGWARN(3, addr << " banned for " << DEFAULT_BAN_TIME << " seconds");
-		}
+        if (!result) {
+            // Only ban if block was actually invalid, not just missing parents
+            if (missing_blocks.empty()) {
+                // Client sent bad data, disconnect and ban it
+                if (reset_counter == new_reset_counter) {
+                    close();
+                    LOGWARN(3, "peer " << static_cast<char*>(m_addrString) << " banned for " << DEFAULT_BAN_TIME << " seconds");
+                }
+                else {
+                    LOGWARN(3, addr << " banned for " << DEFAULT_BAN_TIME << " seconds");
+                }
 
-		P2PServer* server = pool->p2p_server();
-		server->ban(is_v6, addr, DEFAULT_BAN_TIME);
-		server->remove_peer_from_list(addr);
-	}
+                P2PServer* server = pool->p2p_server();
+                server->ban(is_v6, addr, DEFAULT_BAN_TIME);
+                server->remove_peer_from_list(addr);
+                return;
+            }
+            // Otherwise, missing_blocks has parents we need - fall through to request them
+            LOGINFO(5, "block verification pending, need " << missing_blocks.size() << " parent blocks");
+        }
 
 	// We might have been disconnected while side_chain was adding the block
 	// In this case we can't send BLOCK_REQUEST messages on this connection anymore
