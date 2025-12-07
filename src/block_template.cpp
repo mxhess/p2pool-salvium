@@ -682,6 +682,15 @@ void BlockTemplate::update(const MinerData& data, const Mempool& mempool, const 
                 m_poolBlockTemplate->m_transactions.push_back(m_mempoolTxs[m_mempoolTxsOrder[i]].id);
 	}
 
+        // For Carrot v1 blocks, insert protocol TX at position 1
+        if (m_poolBlockTemplate->m_majorVersion >= 10) {
+                hash protocol_tx_hash;
+                calculate_protocol_tx_hash(m_poolBlockTemplate->m_txinGenHeight, protocol_tx_hash);
+                m_poolBlockTemplate->m_transactions.insert(
+                        m_poolBlockTemplate->m_transactions.begin() + 1,
+                        static_cast<indexed_hash>(protocol_tx_hash));
+        }
+
         m_poolBlockTemplate->m_minerWallet = params->m_miningWallet;
 
 	// Layout: [software id, version, random number, sidechain extra_nonce]
@@ -952,6 +961,12 @@ void BlockTemplate::select_mempool_transactions(const Mempool& mempool)
 	PoolBlock* b = m_poolBlockTemplate;
 	b->m_transactions.clear();
 	b->m_transactions.resize(1);
+        // For Carrot v1 blocks, protocol TX takes a slot
+        if (b->m_majorVersion >= 10) {
+                hash protocol_tx_hash;
+                calculate_protocol_tx_hash(b->m_txinGenHeight, protocol_tx_hash);
+                b->m_transactions.push_back(static_cast<indexed_hash>(protocol_tx_hash));
+        }
 	b->m_ephPublicKeys.clear();
 	b->m_outputAmounts.clear();
         b->m_viewTags.clear();

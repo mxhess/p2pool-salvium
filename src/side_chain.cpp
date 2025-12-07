@@ -625,6 +625,8 @@ bool SideChain::add_external_block(PoolBlock& block, std::vector<hash>& missing_
 		return false;
 	}
 
+        LOGINFO(0, "DEBUG get_pow_hash: seed=" << block.m_seed << " txinGenHeight=" << block.m_txinGenHeight);
+
 	if (!block.get_pow_hash(m_pool->hasher(), block.m_txinGenHeight, block.m_seed, block.m_powHash)) {
 		LOGWARN(3, "add_external_block: couldn't get PoW hash for height = " << block.m_sidechainHeight << ", mainchain height " << block.m_txinGenHeight << ". Ignoring it.");
 		forget_incoming_block(block);
@@ -647,6 +649,8 @@ bool SideChain::add_external_block(PoolBlock& block, std::vector<hash>& missing_
 			m_pool->submit_block_async(block.serialize_mainchain_data());
 		}
 	}
+
+        LOGINFO(0, "DEBUG PoW check: sidechainHeight=" << block.m_sidechainHeight << " m_difficulty=" << block.m_difficulty << " m_powHash=" << block.m_powHash);
 
 	if (!block.m_difficulty.check_pow(block.m_powHash)) {
 		LOGWARN(3,
@@ -2491,19 +2495,26 @@ bool SideChain::consider_peer_genesis(const hash& genesis_id, uint64_t timestamp
 		}
 	}
 
-	// If we have a genesis and peer's is older (or same timestamp but lower hash), we need to yield
-	if (m_genesisDecisionMade && our_genesis_timestamp > 0) {
-		const bool peer_wins = (timestamp < our_genesis_timestamp) ||
-			(timestamp == our_genesis_timestamp && genesis_id < our_genesis_id);
-		
-		if (peer_wins) {
-			LOGWARN(3, "Peer has older genesis (theirs=" << timestamp 
-				<< " ours=" << our_genesis_timestamp << "), purging to re-sync");
-			purge_sidechain();
-			// Fall through to adopt peer's genesis
+        // If we have a genesis and peer's is older (or same timestamp but lower hash), we need to yield
+	if (m_genesisDecisionMade) {
+		if (our_genesis_timestamp > 0) {
+			// We have an actual genesis block - check if peer's is older
+			const bool peer_wins = (timestamp < our_genesis_timestamp) ||
+				(timestamp == our_genesis_timestamp && genesis_id < our_genesis_id);
+			if (peer_wins) {
+				LOGWARN(3, "Peer has older genesis (theirs=" << timestamp 
+					<< " ours=" << our_genesis_timestamp << "), purging to re-sync");
+				purge_sidechain();
+				// Fall through to adopt peer's genesis
+			} else {
+				// Our genesis is older or same, keep it
+				return true;
+			}
 		} else {
-			// Our genesis is older or same, keep it
-			return true;
+			// We decided to create our own genesis but haven't mined it yet
+			// Reset and adopt peer's genesis instead
+			LOGINFO(3, "Canceling own genesis creation, will adopt peer's genesis");
+			m_genesisDecisionMade = false;
 		}
 	}
 
@@ -2539,6 +2550,11 @@ void SideChain::purge_sidechain()
 
 	// Clear difficulty data
 	m_difficultyData.clear();
+
+        {
+		WriteLock diff_lock(m_curDifficultyLock);
+		m_curDifficulty = m_minDifficulty;
+	}
 
 	// Reset genesis state to allow new genesis adoption
 	m_genesisDecisionMade = false;

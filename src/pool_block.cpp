@@ -180,6 +180,24 @@ std::vector<uint8_t> PoolBlock::serialize_mainchain_data(size_t* header_size, si
 
         LOGINFO(0, "DEBUG serialize: numOutputs=" << m_outputAmounts.size() << " numEphKeys=" << m_ephPublicKeys.size() << " numViewTags=" << m_viewTags.size() << " numEncAnchors=" << m_encryptedAnchors.size() << " sidechainHeight=" << m_sidechainHeight);
 
+        if (!m_ephPublicKeys.empty()) {
+             LOGINFO(0, "DEBUG serialize K_o[0]=" << m_ephPublicKeys[0]);
+        }
+
+        if (!m_viewTags.empty() && m_viewTags[0].size() >= 3) {
+            char buf[16]; snprintf(buf, sizeof(buf), "%02x%02x%02x", m_viewTags[0][0], m_viewTags[0][1], m_viewTags[0][2]);
+            LOGINFO(0, "DEBUG serialize viewTag[0]=" << (const char*)buf);
+        }
+        if (!m_encryptedAnchors.empty() && m_encryptedAnchors[0].size() >= 16) {
+            std::string hex;
+            for (int i = 0; i < 16; ++i) { char buf[4]; snprintf(buf, sizeof(buf), "%02x", m_encryptedAnchors[0][i]); hex += buf; }
+            LOGINFO(0, "DEBUG serialize encAnchor[0]=" << hex);
+        }
+
+        LOGINFO(0, "DEBUG serialize D_e=" << m_txkeyPub);
+
+        LOGINFO(0, "DEBUG serialize merkleRoot=" << static_cast<const hash&>(m_merkleRoot));
+
         for (size_t i = 0, n = m_outputAmounts.size(); i < n; ++i) {
             const TxOutput& output = m_outputAmounts[i];
 
@@ -302,6 +320,11 @@ std::vector<uint8_t> PoolBlock::serialize_mainchain_data(size_t* header_size, si
         }
         if (include_tx_hashes) {
 		writeVarint(m_transactions.size() - 1, data);
+
+                if (m_transactions.size() > 1) {
+                        LOGINFO(0, "DEBUG serialize tx: m_transactions[1]=" << m_transactions[1] << " sidechainHeight=" << m_sidechainHeight);
+                }
+
 #ifdef WITH_INDEXED_HASHES
 		for (size_t i = 1, n = m_transactions.size(); i < n; ++i) {
 			const hash h = m_transactions[i];
@@ -434,9 +457,18 @@ bool PoolBlock::get_pow_hash(RandomX_Hasher_Base* hasher, uint64_t height, const
 	uint8_t blob[128];
 	size_t blob_size = 0;
 
-	{
-		size_t header_size, miner_tx_size;
-		const std::vector<uint8_t> mainchain_data = serialize_mainchain_data(&header_size, &miner_tx_size, nullptr, nullptr, nullptr, nullptr);
+        {
+                // For Carrot v1 blocks, ensure m_transactions has space for protocol TX before serializing
+                if (m_majorVersion >= 10) {
+                        if (m_transactions.size() < 2) {
+                                m_transactions.resize(2);
+                        }
+                        hash protocol_tx_hash;
+                        calculate_protocol_tx_hash(m_txinGenHeight, protocol_tx_hash);
+                        m_transactions[1] = static_cast<indexed_hash>(protocol_tx_hash);
+                }
+                size_t header_size, miner_tx_size;
+                const std::vector<uint8_t> mainchain_data = serialize_mainchain_data(&header_size, &miner_tx_size, nullptr, nullptr, nullptr, nullptr);
 
 		if (!header_size || !miner_tx_size || (mainchain_data.size() < header_size + miner_tx_size)) {
 			LOGERR(1, "tried to calculate PoW of uninitialized block");
@@ -472,13 +504,6 @@ bool PoolBlock::get_pow_hash(RandomX_Hasher_Base* hasher, uint64_t height, const
 
                 // Save the coinbase tx hash into the first element of m_transactions
                 m_transactions[0] = static_cast<indexed_hash>(tmp);
-
-                // For Carrot v1 blocks, compute and store protocol TX hash at position 1
-                if ((m_majorVersion >= 10) && (m_transactions.size() >= 2)) {
-                        hash protocol_tx_hash;
-                        calculate_protocol_tx_hash(m_txinGenHeight, protocol_tx_hash);
-                        m_transactions[1] = static_cast<indexed_hash>(protocol_tx_hash);
-                }
 
                 // DEBUG: dump m_transactions for comparison
                 LOGINFO(0, "get_pow_hash: m_transactions.size()=" << m_transactions.size());
@@ -516,6 +541,16 @@ bool PoolBlock::get_pow_hash(RandomX_Hasher_Base* hasher, uint64_t height, const
 
 	// cppcheck-suppress danglingLifetime
 	m_hashingBlob.assign(blob, blob + blob_size);
+
+        {
+            std::string hex;
+            for (size_t i = 0; i < blob_size; ++i) {
+                char buf[4];
+                snprintf(buf, sizeof(buf), "%02x", blob[i]);
+                hex += buf;
+            }
+            LOGINFO(0, "DEBUG hashing blob (" << blob_size << " bytes): " << hex);
+        }
 
 	return hasher->calculate(blob, blob_size, height, seed_hash, pow_hash, force_light_mode);
 }

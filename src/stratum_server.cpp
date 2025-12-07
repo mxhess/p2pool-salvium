@@ -983,6 +983,19 @@ void StratumServer::on_share_found(uv_work_t* req)
 		}
 
 		hash pow_hash;
+
+                LOGINFO(0, "DEBUG stratum hash: height=" << height << " seed=" << seed_hash << " blob_size=" << blob_size);
+
+                {
+                    std::string hex;
+                    for (size_t i = 0; i < blob_size; ++i) {
+                        char buf[4];
+                        snprintf(buf, sizeof(buf), "%02x", blob[i]);
+                        hex += buf;
+                    }
+                    LOGINFO(0, "DEBUG stratum blob: " << hex);
+                }
+
 		if (!pool->calculate_hash(blob, blob_size, height, seed_hash, pow_hash, false)) {
 			LOGWARN(3, "client " << static_cast<char*>(share->m_clientAddrString) << " couldn't check share PoW");
 			share->m_result = SubmittedShare::Result::COULDNT_CHECK_POW;

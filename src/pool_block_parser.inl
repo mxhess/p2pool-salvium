@@ -446,10 +446,6 @@ skip_protocol_tx:
 
                         const uint64_t n = transactions.size();
 
-                        if (n > 0) {
-                                m_transactions.emplace_back(transactions[0]);
-                        }
-
                         for (uint64_t i = 1; i < n; ++i) {
                                 const uint64_t parent_index = parent_indices[i];
                                 if (parent_index) {
@@ -465,8 +461,8 @@ skip_protocol_tx:
                         }
                 }
                 else {
-                        for (const hash& h : transactions) {
-                                m_transactions.emplace_back(h);
+                        for (size_t i = 1; i < transactions.size(); ++i) {
+                                m_transactions.emplace_back(transactions[i]);
                         }
                 }
 
@@ -575,6 +571,12 @@ skip_protocol_tx:
 
                 const uint8_t* transactions_blob = reinterpret_cast<uint8_t*>(transactions.data() + 1);
 
+                if (transactions_blob_size > 0) {
+                    hash tx_h;
+                    memcpy(tx_h.h, transactions_blob, HASH_SIZE);
+                    LOGINFO(0, "DEBUG transactions_blob first hash: " << tx_h);
+                }
+
 #if POOL_BLOCK_DEBUG
                 memcpy(m_mainChainDataDebug.data() + outputs_offset, outputs_blob.data(), outputs_blob_size);
                 memcpy(m_mainChainDataDebug.data() + transactions_offset + outputs_blob_size_diff, transactions_blob, transactions_blob_size);
@@ -583,6 +585,8 @@ skip_protocol_tx:
                 hash check;
                 const std::vector<uint8_t>& consensus_id = sidechain.consensus_id();
                 const int data_size = static_cast<int>((data_end - data_begin) + outputs_blob_size_diff + transactions_blob_size_diff);
+
+                LOGINFO(0, "DEBUG hash params: data_size=" << data_size << " outputs_offset=" << outputs_offset << " outputs_blob_size=" << outputs_blob_size << " outputs_blob_size_diff=" << outputs_blob_size_diff << " transactions_offset=" << transactions_offset << " transactions_blob_size=" << transactions_blob_size << " transactions_blob_size_diff=" << transactions_blob_size_diff << " nonce_offset=" << nonce_offset << " extra_nonce_offset=" << extra_nonce_offset << " mm_root_hash_offset=" << mm_root_hash_offset << " consensus_id_size=" << consensus_id.size());
 
                 if (data_size > static_cast<int>(MAX_BLOCK_SIZE)) {
                         return __LINE__;
@@ -658,6 +662,16 @@ skip_protocol_tx:
         catch (std::exception& e) {
                 LOGERR(0, "Exception in PoolBlock::deserialize(): " << e.what());
                 return __LINE__;
+        }
+
+        // For Carrot v1 blocks, ensure protocol TX is populated
+        if (m_majorVersion >= 10) {
+                if (m_transactions.size() < 2) {
+                        m_transactions.resize(2);
+                }
+                hash protocol_tx_hash;
+                calculate_protocol_tx_hash(m_txinGenHeight, protocol_tx_hash);
+                m_transactions[1] = static_cast<indexed_hash>(protocol_tx_hash);
         }
 
         reset_offchain_data();
