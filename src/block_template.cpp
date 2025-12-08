@@ -639,14 +639,23 @@ void BlockTemplate::update(const MinerData& data, const Mempool& mempool, const 
 
         // First, calculate and store the miner TX hash
         hash miner_tx_hash = calc_miner_tx_hash(0);
-            
-        // Clear and rebuild m_transactionHashes with both hashes
+        
+        // m_transactionHashes currently has: [zeros placeholder][mempool tx 0][mempool tx 1]...
+        // We need: [miner tx][protocol tx][mempool tx 0][mempool tx 1]...
+        
+        // Save mempool txs (everything after position 0)
+        std::vector<uint8_t> mempool_txs;
+        if (m_transactionHashes.size() > HASH_SIZE) {
+                mempool_txs.assign(m_transactionHashes.begin() + HASH_SIZE, m_transactionHashes.end());
+        }
+        
+        // Rebuild with correct order
         m_transactionHashes.clear();
-        m_transactionHashes.reserve(HASH_SIZE * 2);
+        m_transactionHashes.reserve(HASH_SIZE * 2 + mempool_txs.size());
         m_transactionHashes.insert(m_transactionHashes.end(), miner_tx_hash.h, miner_tx_hash.h + HASH_SIZE);
-            
+        
         LOGINFO(3, "Stored miner TX hash at position 0: " << miner_tx_hash);
-            
+        
         // Write protocol tx bytes to blob
         writeVarint(4, m_blockTemplateBlob);           // version
         writeVarint(60, m_blockTemplateBlob);          // unlock_time
@@ -659,36 +668,36 @@ void BlockTemplate::update(const MinerData& data, const Mempool& mempool, const 
         m_blockTemplateBlob.push_back(0x00);           // extra[1]
         writeVarint(2, m_blockTemplateBlob);           // type PROTOCOL
         m_blockTemplateBlob.push_back(0);              // RCT type
-
+        
         // Calculate protocol tx hash and store in member variable
         calculate_protocol_tx_hash(data.height, m_protocolTxHash);
         LOGINFO(3, "Protocol TX hash: " << m_protocolTxHash);
-
-        // Add to transaction list after miner tx
+        
+        // Add protocol tx hash after miner tx
         m_transactionHashes.insert(m_transactionHashes.end(), m_protocolTxHash.h, m_protocolTxHash.h + HASH_SIZE);
+        
+        // Add mempool txs back
+        if (!mempool_txs.empty()) {
+                m_transactionHashes.insert(m_transactionHashes.end(), mempool_txs.begin(), mempool_txs.end());
+        }
 
         // Now write tx_hashes section
         // For HF10+, blob tx_count excludes protocol tx (it's implicit like miner tx)
-        const uint64_t blob_tx_count = (data.major_version >= 10) ? (m_numTransactionHashes >= 2 ? m_numTransactionHashes - 2 : 0) : m_numTransactionHashes;
+        const uint64_t blob_tx_count = m_numTransactionHashes;
         writeVarint(blob_tx_count, m_blockTemplateBlob);
         
         // Miner tx hash is skipped here because it's not a part of block template
         m_blockTemplateBlob.insert(m_blockTemplateBlob.end(), m_transactionHashes.begin() + HASH_SIZE * 2, m_transactionHashes.end());
 
+        // Build m_transactions directly from m_transactionHashes to ensure they match
         m_poolBlockTemplate->m_transactions.clear();
-	m_poolBlockTemplate->m_transactions.resize(1);
-	m_poolBlockTemplate->m_transactions.reserve(m_mempoolTxsOrder.size() + 1);
-	for (size_t i = 0, n = m_mempoolTxsOrder.size(); i < n;  ++i) {
-                m_poolBlockTemplate->m_transactions.push_back(m_mempoolTxs[m_mempoolTxsOrder[i]].id);
-	}
-
-        // For Carrot v1 blocks, insert protocol TX at position 1
-        if (m_poolBlockTemplate->m_majorVersion >= 10) {
-                hash protocol_tx_hash;
-                calculate_protocol_tx_hash(m_poolBlockTemplate->m_txinGenHeight, protocol_tx_hash);
-                m_poolBlockTemplate->m_transactions.insert(
-                        m_poolBlockTemplate->m_transactions.begin() + 1,
-                        static_cast<indexed_hash>(protocol_tx_hash));
+        m_poolBlockTemplate->m_transactions.resize(1);  // Placeholder for coinbase at [0]
+        // m_transactionHashes layout: [miner_tx][protocol_tx][mempool_tx_0][mempool_tx_1]...
+        // Copy protocol_tx and all mempool txs (skip miner_tx at position 0)
+        for (size_t i = HASH_SIZE; i < m_transactionHashes.size(); i += HASH_SIZE) {
+                hash h;
+                memcpy(h.h, m_transactionHashes.data() + i, HASH_SIZE);
+                m_poolBlockTemplate->m_transactions.push_back(static_cast<indexed_hash>(h));
         }
 
         m_poolBlockTemplate->m_minerWallet = params->m_miningWallet;
@@ -849,7 +858,7 @@ void BlockTemplate::update(const MinerData& data, const Mempool& mempool, const 
 	m_minerTx.clear();
 	m_blockHeader.clear();
 	m_minerTxExtra.clear();
-	m_transactionHashes.clear();
+	// m_transactionHashes.clear();
 	m_transactionHashesSet.clear();
 	m_rewards.clear();
 	m_mempoolTxs.clear();
@@ -1562,49 +1571,24 @@ uint32_t BlockTemplate::get_hashing_blob_nolock(uint32_t extra_nonce, uint8_t* b
         // Block header
         memcpy(p, m_blockTemplateBlob.data(), m_blockHeaderSize);
         p += m_blockHeaderSize;
+
+        // Merkle tree hash - build from all transactions and use merkle_hash()
+        hash miner_tx_hash = calc_miner_tx_hash(extra_nonce);
+        const size_t num_hashes = m_transactionHashes.size() / HASH_SIZE;
         
-        // Merkle tree hash
-        hash root_hash = calc_miner_tx_hash(extra_nonce);
-        
-        // For Carrot v1 (HF10+) with protocol TX, simple 2-transaction merkle tree
-        if (m_majorVersion >= 10) {
-                // Just hash miner TX hash + protocol TX hash
-                uint8_t merkle_data[HASH_SIZE * 2];
-                memcpy(merkle_data, root_hash.h, HASH_SIZE);
-                // Protocol TX hash is the first (and only) entry in transaction hashes after miner TX
-                memcpy(merkle_data + HASH_SIZE, m_protocolTxHash.h, HASH_SIZE);
-                
-                // DEBUG: Show what we're actually hashing
-                LOGINFO(6, "DEBUG: About to hash merkle data (raw bytes):");
-                LOGINFO(6, "  Full 64 bytes: " << log::hex_buf(merkle_data, HASH_SIZE * 2));
-
-                LOGINFO(6, "  First 32 bytes (miner):   " << log::hex_buf(merkle_data, HASH_SIZE));
-                LOGINFO(6, "  Second 32 bytes (protocol): " << log::hex_buf(merkle_data + HASH_SIZE, HASH_SIZE));
-                LOGINFO(6, "  m_transactionHashes size: " << m_transactionHashes.size());
-                
-                keccak(merkle_data, HASH_SIZE * 2, root_hash.h);
-
-                // DEBUG: Verify the result
-                LOGINFO(6, "  Result merkle root: " << log::hex_buf(root_hash.h, HASH_SIZE));
-                
-                // DEBUG: Manually verify by re-hashing
-                hash verify_hash;
-                keccak(merkle_data, HASH_SIZE * 2, verify_hash.h);
-                LOGINFO(6, "  Verify merkle root: " << log::hex_buf(verify_hash.h, HASH_SIZE));
-
-        } else {
-                // Pre-Carrot: use merkle branch logic
-                for (size_t i = 0; i < m_merkleTreeMainBranch.size(); i += HASH_SIZE) {
-                        uint8_t h[HASH_SIZE * 2];
-                        memcpy(h, root_hash.h, HASH_SIZE);
-                        memcpy(h + HASH_SIZE, m_merkleTreeMainBranch.data() + i, HASH_SIZE);
-                        keccak(h, HASH_SIZE * 2, root_hash.h);
-                }
+        std::vector<hash> hashes(num_hashes);
+        hashes[0] = miner_tx_hash;  // miner tx with current extra_nonce
+        for (size_t i = 1; i < num_hashes; ++i) {
+                memcpy(hashes[i].h, m_transactionHashes.data() + i * HASH_SIZE, HASH_SIZE);
         }
+        root_hash merkle_root;
+        merkle_hash(hashes, merkle_root);
         
-        memcpy(p, root_hash.h, HASH_SIZE);
+        LOGINFO(6, "  m_transactionHashes size: " << m_transactionHashes.size() << " num_hashes: " << num_hashes);
+        LOGINFO(6, "  Result merkle root: " << static_cast<const hash&>(merkle_root));
+        memcpy(p, merkle_root.h, HASH_SIZE); 
         p += HASH_SIZE;
-        
+
         // Total number of transactions in this block (including the miner tx)
         // FOR HF10+, include both miner tx and protocol tx
         const uint64_t tx_count_in_header = m_numTransactionHashes + (m_majorVersion >= 10 ? 2 : 1);

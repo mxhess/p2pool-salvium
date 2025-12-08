@@ -650,7 +650,7 @@ bool SideChain::add_external_block(PoolBlock& block, std::vector<hash>& missing_
 		}
 	}
 
-        LOGINFO(0, "DEBUG PoW check: sidechainHeight=" << block.m_sidechainHeight << " m_difficulty=" << block.m_difficulty << " m_powHash=" << block.m_powHash);
+        LOGINFO(0, "DEBUG PoW check: sidechainHeight=" << block.m_sidechainHeight << " m_difficulty.lo=" << block.m_difficulty.lo << " m_difficulty.hi=" << block.m_difficulty.hi << " m_powHash=" << block.m_powHash);
 
 	if (!block.m_difficulty.check_pow(block.m_powHash)) {
 		LOGWARN(3,

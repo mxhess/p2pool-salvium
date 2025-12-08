@@ -556,7 +556,7 @@ void p2pool::get_missing_heights()
 		m_missingHeights.pop_back();
 	}
 
-	LOGWARN(3, "Mainchain data for height " << h << " is missing, requesting it from monerod again");
+	LOGWARN(3, "Mainchain data for height " << h << " is missing, requesting it from salviumd again");
 
 	char buf[log::Stream::BUF_SIZE + 1] = {};
 	log::Stream s(buf);
@@ -1644,7 +1644,7 @@ void p2pool::parse_get_info_rpc(const char* data, size_t size)
 	}
 
 	if (info.busy_syncing || !info.synchronized) {
-		LOGINFO(1, "monerod is " << (info.busy_syncing ? "busy syncing" : "not synchronized") << ", trying again in 1 second");
+		LOGINFO(1, "salviumd is " << (info.busy_syncing ? "busy syncing" : "not synchronized") << ", trying again in 1 second");
 		std::this_thread::sleep_for(std::chrono::milliseconds(1000));
 		switch_host();
 		get_info();
@@ -1660,7 +1660,7 @@ void p2pool::parse_get_info_rpc(const char* data, size_t size)
 	const NetworkType sidechain_network = m_sideChain->network_type();
 
 	if (monero_network != sidechain_network) {
-		LOGERR(1, "monerod is on " << monero_network << ", but you're mining to a " << sidechain_network << " sidechain");
+		LOGERR(1, "salviumd is on " << monero_network << ", but you're mining to a " << sidechain_network << " sidechain");
 		PANIC_STOP();
 	}
 
@@ -1732,7 +1732,7 @@ void p2pool::parse_get_version_rpc(const char* data, size_t size)
 		const uint64_t version_lo = version & 65535;
 		const uint64_t required_version_hi = required >> 16;
 		const uint64_t required_version_lo = required & 65535;
-		LOGERR(1, "monerod RPC v" << version_hi << '.' << version_lo << " is incompatible, update to RPC >= v" << required_version_hi << '.' << required_version_lo << " (Monero v0.18.0.0 or newer)");
+		LOGERR(1, "salviumd RPC v" << version_hi << '.' << version_lo << " is incompatible, update to RPC >= v" << required_version_hi << '.' << required_version_lo << " (Monero v0.18.0.0 or newer)");
 		PANIC_STOP();
 	}
 
