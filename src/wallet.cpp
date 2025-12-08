@@ -212,10 +212,10 @@ bool Wallet::decode(const char* address)
                 sprintf(data_hex + i*2, "%02x", data[i]);
             }
             sprintf(prefix_hex, "0x%lx", m_prefix);
-            LOGINFO(0, "decode varint_len=" << varint_len << " data_index=" << data_index << " prefix=" << static_cast<const char*>(prefix_hex));
-            LOGINFO(0, "decode raw_data: " << static_cast<const char*>(data_hex));
-            LOGINFO(0, "decode spend:    " << static_cast<const char*>(spend_hex));
-            LOGINFO(0, "decode view:     " << static_cast<const char*>(view_hex));
+            LOGINFO(6, "decode varint_len=" << varint_len << " data_index=" << data_index << " prefix=" << static_cast<const char*>(prefix_hex));
+            LOGINFO(6, "decode raw_data: " << static_cast<const char*>(data_hex));
+            LOGINFO(6, "decode spend:    " << static_cast<const char*>(spend_hex));
+            LOGINFO(6, "decode view:     " << static_cast<const char*>(view_hex));
         }
 
         // Load checksum from correct position (at end of decoded data)

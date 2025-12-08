@@ -984,7 +984,7 @@ void StratumServer::on_share_found(uv_work_t* req)
 
 		hash pow_hash;
 
-                LOGINFO(0, "DEBUG stratum hash: height=" << height << " seed=" << seed_hash << " blob_size=" << blob_size);
+                LOGINFO(6, "DEBUG stratum hash: height=" << height << " seed=" << seed_hash << " blob_size=" << blob_size);
 
                 {
                     std::string hex;
@@ -993,7 +993,7 @@ void StratumServer::on_share_found(uv_work_t* req)
                         snprintf(buf, sizeof(buf), "%02x", blob[i]);
                         hex += buf;
                     }
-                    LOGINFO(0, "DEBUG stratum blob: " << hex);
+                    LOGINFO(6, "DEBUG stratum blob: " << hex);
                 }
 
 		if (!pool->calculate_hash(blob, blob_size, height, seed_hash, pow_hash, false)) {

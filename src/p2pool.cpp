@@ -1121,7 +1121,7 @@ void p2pool::submit_block() const
         		snprintf(buf, sizeof(buf), "%02x", submit_data.blob[i]);
         		hex.append(buf);
         	}
-        	LOGINFO(0, "DEBUG BLOCK BLOB: " << hex);
+        	LOGINFO(6, "DEBUG BLOCK BLOB: " << hex);
 	
         	if (submit_data.blob.empty()) {
         		LOGERR(0, "submit_block: couldn't find block template with id " << submit_data.template_id);
@@ -1145,7 +1145,7 @@ void p2pool::submit_block() const
         std::vector<uint8_t> blob;
         blob.reserve(submit_data.blob.size());
 
-        LOGINFO(0, "DEBUG submit_block offsets: nonce_offset=" << nonce_offset 
+        LOGINFO(6, "DEBUG submit_block offsets: nonce_offset=" << nonce_offset 
                 << ", extra_nonce_offset=" << extra_nonce_offset 
                 << ", merkle_root_offset=" << merkle_root_offset
                 << ", blob_size=" << submit_data.blob.size());
@@ -1158,7 +1158,7 @@ void p2pool::submit_block() const
                 else if (extra_nonce_offset && extra_nonce_offset <= i && i < extra_nonce_offset + sizeof(extra_nonce)) {
                         b = (extra_nonce >> ((i - extra_nonce_offset) * 8)) & 255;
                         if (i == extra_nonce_offset) {
-                                LOGINFO(0, "DEBUG: Patching extra_nonce at offset " << i << ", value=" << extra_nonce);
+                                LOGINFO(6, "DEBUG: Patching extra_nonce at offset " << i << ", value=" << extra_nonce);
                         }
 
                 }
@@ -1178,7 +1178,7 @@ void p2pool::submit_block() const
 
         // DEBUG: Show what we're actually sending
         std::string sent_blob_hex = request.substr(request.find("\":[\"")+4, 400);
-        LOGINFO(0, "DEBUG: First 200 bytes of hex being sent: " << sent_blob_hex.substr(0, 400));
+        LOGINFO(6, "DEBUG: First 200 bytes of hex being sent: " << sent_blob_hex.substr(0, 400));
 
 	hash digest;
 	sha256(blob.data(), static_cast<uint32_t>(blob.size()), digest.h);

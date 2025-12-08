@@ -178,25 +178,25 @@ std::vector<uint8_t> PoolBlock::serialize_mainchain_data(size_t* header_size, si
 
 	writeVarint(m_outputAmounts.size(), data);
 
-        LOGINFO(0, "DEBUG serialize: numOutputs=" << m_outputAmounts.size() << " numEphKeys=" << m_ephPublicKeys.size() << " numViewTags=" << m_viewTags.size() << " numEncAnchors=" << m_encryptedAnchors.size() << " sidechainHeight=" << m_sidechainHeight);
+        LOGINFO(6, "DEBUG serialize: numOutputs=" << m_outputAmounts.size() << " numEphKeys=" << m_ephPublicKeys.size() << " numViewTags=" << m_viewTags.size() << " numEncAnchors=" << m_encryptedAnchors.size() << " sidechainHeight=" << m_sidechainHeight);
 
         if (!m_ephPublicKeys.empty()) {
-             LOGINFO(0, "DEBUG serialize K_o[0]=" << m_ephPublicKeys[0]);
+             LOGINFO(6, "DEBUG serialize K_o[0]=" << m_ephPublicKeys[0]);
         }
 
         if (!m_viewTags.empty() && m_viewTags[0].size() >= 3) {
             char buf[16]; snprintf(buf, sizeof(buf), "%02x%02x%02x", m_viewTags[0][0], m_viewTags[0][1], m_viewTags[0][2]);
-            LOGINFO(0, "DEBUG serialize viewTag[0]=" << (const char*)buf);
+            LOGINFO(6, "DEBUG serialize viewTag[0]=" << (const char*)buf);
         }
         if (!m_encryptedAnchors.empty() && m_encryptedAnchors[0].size() >= 16) {
             std::string hex;
             for (int i = 0; i < 16; ++i) { char buf[4]; snprintf(buf, sizeof(buf), "%02x", m_encryptedAnchors[0][i]); hex += buf; }
-            LOGINFO(0, "DEBUG serialize encAnchor[0]=" << hex);
+            LOGINFO(6, "DEBUG serialize encAnchor[0]=" << hex);
         }
 
-        LOGINFO(0, "DEBUG serialize D_e=" << m_txkeyPub);
+        LOGINFO(6, "DEBUG serialize D_e=" << m_txkeyPub);
 
-        LOGINFO(0, "DEBUG serialize merkleRoot=" << static_cast<const hash&>(m_merkleRoot));
+        LOGINFO(6, "DEBUG serialize merkleRoot=" << static_cast<const hash&>(m_merkleRoot));
 
         for (size_t i = 0, n = m_outputAmounts.size(); i < n; ++i) {
             const TxOutput& output = m_outputAmounts[i];
@@ -322,7 +322,7 @@ std::vector<uint8_t> PoolBlock::serialize_mainchain_data(size_t* header_size, si
 		writeVarint(m_transactions.size() - 1, data);
 
                 if (m_transactions.size() > 1) {
-                        LOGINFO(0, "DEBUG serialize tx: m_transactions[1]=" << m_transactions[1] << " sidechainHeight=" << m_sidechainHeight);
+                        LOGINFO(6, "DEBUG serialize tx: m_transactions[1]=" << m_transactions[1] << " sidechainHeight=" << m_sidechainHeight);
                 }
 
 #ifdef WITH_INDEXED_HASHES
@@ -481,7 +481,7 @@ bool PoolBlock::get_pow_hash(RandomX_Hasher_Base* hasher, uint64_t height, const
 		const uint8_t* miner_tx = mainchain_data.data() + header_size;
 
                 // DEBUG: dump miner TX for comparison
-                LOGINFO(0, "get_pow_hash: header_size=" << header_size << " miner_tx_size=" << miner_tx_size);
+                LOGINFO(6, "get_pow_hash: header_size=" << header_size << " miner_tx_size=" << miner_tx_size);
                 {
                     std::string hex_dump;
                     for (size_t dbg_i = 0; dbg_i < std::min(miner_tx_size, size_t(160)); ++dbg_i) {
@@ -489,7 +489,7 @@ bool PoolBlock::get_pow_hash(RandomX_Hasher_Base* hasher, uint64_t height, const
                         snprintf(dbg_buf, sizeof(dbg_buf), "%02x", miner_tx[dbg_i]);
                         hex_dump += dbg_buf;
                     }
-                    LOGINFO(0, "miner_tx bytes: " << hex_dump);
+                    LOGINFO(6, "miner_tx bytes: " << hex_dump);
                 }
 
 		hash tmp;
@@ -506,7 +506,7 @@ bool PoolBlock::get_pow_hash(RandomX_Hasher_Base* hasher, uint64_t height, const
                 m_transactions[0] = static_cast<indexed_hash>(tmp);
 
                 // DEBUG: dump m_transactions for comparison
-                LOGINFO(0, "get_pow_hash: m_transactions.size()=" << m_transactions.size());
+                LOGINFO(6, "get_pow_hash: m_transactions.size()=" << m_transactions.size());
                 for (size_t dbg_i = 0; dbg_i < m_transactions.size(); ++dbg_i) {
                     const hash& dbg_h = m_transactions[dbg_i];
                     std::string hex;
@@ -515,7 +515,7 @@ bool PoolBlock::get_pow_hash(RandomX_Hasher_Base* hasher, uint64_t height, const
                         snprintf(buf, sizeof(buf), "%02x", dbg_h.h[j]);
                         hex += buf;
                     }
-                    LOGINFO(0, "get_pow_hash: m_transactions[" << dbg_i << "]=" << hex);
+                    LOGINFO(6, "get_pow_hash: m_transactions[" << dbg_i << "]=" << hex);
                 }
 
                 root_hash tmp_root;
@@ -549,7 +549,7 @@ bool PoolBlock::get_pow_hash(RandomX_Hasher_Base* hasher, uint64_t height, const
                 snprintf(buf, sizeof(buf), "%02x", blob[i]);
                 hex += buf;
             }
-            LOGINFO(0, "DEBUG hashing blob (" << blob_size << " bytes): " << hex);
+            LOGINFO(6, "DEBUG hashing blob (" << blob_size << " bytes): " << hex);
         }
 
 	return hasher->calculate(blob, blob_size, height, seed_hash, pow_hash, force_light_mode);

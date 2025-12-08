@@ -574,7 +574,7 @@ skip_protocol_tx:
                 if (transactions_blob_size > 0) {
                     hash tx_h;
                     memcpy(tx_h.h, transactions_blob, HASH_SIZE);
-                    LOGINFO(0, "DEBUG transactions_blob first hash: " << tx_h);
+                    LOGINFO(6, "DEBUG transactions_blob first hash: " << tx_h);
                 }
 
 #if POOL_BLOCK_DEBUG
@@ -586,7 +586,7 @@ skip_protocol_tx:
                 const std::vector<uint8_t>& consensus_id = sidechain.consensus_id();
                 const int data_size = static_cast<int>((data_end - data_begin) + outputs_blob_size_diff + transactions_blob_size_diff);
 
-                LOGINFO(0, "DEBUG hash params: data_size=" << data_size << " outputs_offset=" << outputs_offset << " outputs_blob_size=" << outputs_blob_size << " outputs_blob_size_diff=" << outputs_blob_size_diff << " transactions_offset=" << transactions_offset << " transactions_blob_size=" << transactions_blob_size << " transactions_blob_size_diff=" << transactions_blob_size_diff << " nonce_offset=" << nonce_offset << " extra_nonce_offset=" << extra_nonce_offset << " mm_root_hash_offset=" << mm_root_hash_offset << " consensus_id_size=" << consensus_id.size());
+                LOGINFO(6, "DEBUG hash params: data_size=" << data_size << " outputs_offset=" << outputs_offset << " outputs_blob_size=" << outputs_blob_size << " outputs_blob_size_diff=" << outputs_blob_size_diff << " transactions_offset=" << transactions_offset << " transactions_blob_size=" << transactions_blob_size << " transactions_blob_size_diff=" << transactions_blob_size_diff << " nonce_offset=" << nonce_offset << " extra_nonce_offset=" << extra_nonce_offset << " mm_root_hash_offset=" << mm_root_hash_offset << " consensus_id_size=" << consensus_id.size());
 
                 if (data_size > static_cast<int>(MAX_BLOCK_SIZE)) {
                         return __LINE__;
@@ -650,10 +650,10 @@ skip_protocol_tx:
                         snprintf(buf, sizeof(buf), "%02x", outputs_blob[i]);
                         hex += buf;
                     }
-                    LOGINFO(0, "DEBUG parser outputs_blob (first 64): " << hex << " size=" << outputs_blob.size());
+                    LOGINFO(6, "DEBUG parser outputs_blob (first 64): " << hex << " size=" << outputs_blob.size());
                 }
 
-                LOGINFO(0, "DEBUG merkle verify: sidechain_height=" << m_sidechainHeight << " mm_aux_slot=" << mm_aux_slot << " n_chains=" << mm_n_aux_chains << " proof_size=" << m_merkleProof.size() << " check=" << check << " merkleRoot=" << static_cast<const hash&>(m_merkleRoot));
+                LOGINFO(6, "DEBUG merkle verify: sidechain_height=" << m_sidechainHeight << " mm_aux_slot=" << mm_aux_slot << " n_chains=" << mm_n_aux_chains << " proof_size=" << m_merkleProof.size() << " check=" << check << " merkleRoot=" << static_cast<const hash&>(m_merkleRoot));
 
                 if (!verify_merkle_proof(check, m_merkleProof, mm_aux_slot, mm_n_aux_chains, m_merkleRoot)) {
                         return __LINE__;

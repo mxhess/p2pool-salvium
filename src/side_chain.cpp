@@ -472,7 +472,7 @@ bool SideChain::get_shares(const PoolBlock* tip, std::vector<MinerShare>& shares
 		}
 		pplns_weight += cur_weight;
 
-                LOGINFO(0, "get_shares: height=" << cur->m_sidechainHeight << " wallet=" << cur->m_minerWallet << " pplns_weight=" << pplns_weight << " max=" << max_pplns_weight << " mainchain_h=" << tip->m_txinGenHeight << " depth=" << block_depth);
+                LOGINFO(6, "get_shares: height=" << cur->m_sidechainHeight << " wallet=" << cur->m_minerWallet << " pplns_weight=" << pplns_weight << " max=" << max_pplns_weight << " mainchain_h=" << tip->m_txinGenHeight << " depth=" << block_depth);
 
 		// One non-uncle share can go above the limit, but it will also guarantee that "shares" is never empty
 		if (pplns_weight > max_pplns_weight) {
@@ -625,7 +625,7 @@ bool SideChain::add_external_block(PoolBlock& block, std::vector<hash>& missing_
 		return false;
 	}
 
-        LOGINFO(0, "DEBUG get_pow_hash: seed=" << block.m_seed << " txinGenHeight=" << block.m_txinGenHeight);
+        LOGINFO(6, "DEBUG get_pow_hash: seed=" << block.m_seed << " txinGenHeight=" << block.m_txinGenHeight);
 
 	if (!block.get_pow_hash(m_pool->hasher(), block.m_txinGenHeight, block.m_seed, block.m_powHash)) {
 		LOGWARN(3, "add_external_block: couldn't get PoW hash for height = " << block.m_sidechainHeight << ", mainchain height " << block.m_txinGenHeight << ". Ignoring it.");
@@ -650,7 +650,7 @@ bool SideChain::add_external_block(PoolBlock& block, std::vector<hash>& missing_
 		}
 	}
 
-        LOGINFO(0, "DEBUG PoW check: sidechainHeight=" << block.m_sidechainHeight << " m_difficulty.lo=" << block.m_difficulty.lo << " m_difficulty.hi=" << block.m_difficulty.hi << " m_powHash=" << block.m_powHash);
+        LOGINFO(6, "DEBUG PoW check: sidechainHeight=" << block.m_sidechainHeight << " m_difficulty.lo=" << block.m_difficulty.lo << " m_difficulty.hi=" << block.m_difficulty.hi << " m_powHash=" << block.m_powHash);
 
 	if (!block.m_difficulty.check_pow(block.m_powHash)) {
 		LOGWARN(3,
@@ -885,7 +885,7 @@ const PoolBlock* SideChain::get_block_blob(const hash& id, std::vector<uint8_t>&
                 snprintf(buf, sizeof(buf), "%02x", blob[i]);
                 hex += buf;
             }
-            LOGINFO(0, "DEBUG get_block_blob outputs area (64 bytes from offset 43): " << hex);
+            LOGINFO(6, "DEBUG get_block_blob outputs area (64 bytes from offset 43): " << hex);
         }
 	const std::vector<uint8_t> sidechain_data = block->serialize_sidechain_data();
 	blob.insert(blob.end(), sidechain_data.begin(), sidechain_data.end());

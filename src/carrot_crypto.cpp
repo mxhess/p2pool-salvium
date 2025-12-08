@@ -84,7 +84,7 @@ static void debug_hex(const char* label, const uint8_t* data, size_t len)
     for (size_t i = 0; i < len && i < 64; ++i) {
         sprintf(hex + i*2, "%02x", data[i]);
     }
-    LOGINFO(0, label << ": " << static_cast<const char*>(hex));
+    LOGINFO(6, label << ": " << static_cast<const char*>(hex));
 }
 
 // BLAKE2b keyed hash wrapper

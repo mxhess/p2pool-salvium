@@ -2524,7 +2524,7 @@ bool P2PServer::P2PClient::on_handshake_challenge(const uint8_t* buf)
 	uint64_t peer_id;
 	memcpy(&peer_id, buf + CHALLENGE_SIZE, sizeof(uint64_t));
 
-	LOGINFO(0, "DEBUG: Received handshake from " << static_cast<const char*>(m_addrString) 
+	LOGINFO(6, "DEBUG: Received handshake from " << static_cast<const char*>(m_addrString) 
 	        << " peer_id=" << peer_id 
 	        << " my_id=" << server->get_peerId(false)
 	        << " my_tor_id=" << server->get_peerId(true));
