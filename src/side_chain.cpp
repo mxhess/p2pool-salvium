@@ -2447,6 +2447,15 @@ void SideChain::prune_old_blocks()
 		}
 #endif
 	}
+
+        // If side-chain started pruning blocks it means the initial sync is complete
+        // It's now safe to delete cached blocks
+        if (!m_readyToMine.load()) {
+                m_readyToMine.store(true);
+                LOGINFO(0, log::LightGreen() << "########################################");
+                LOGINFO(0, log::LightGreen() << "SIDECHAIN LOADED - MINING IS NOW ENABLED");
+                LOGINFO(0, log::LightGreen() << "########################################");
+        }
 }
 
 void SideChain::get_missing_blocks(unordered_set<hash>& missing_blocks) const

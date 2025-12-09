@@ -88,6 +88,8 @@ public:
 	[[nodiscard]] FORCEINLINE uint64_t miner_count() const { ReadLock lock(m_seenDataLock); return m_seenWallets.size(); }
 	[[nodiscard]] FORCEINLINE uint64_t onion_pubkeys_count() const { ReadLock lock(m_seenDataLock); return m_seenOnionPubkeys.size(); }
 	[[nodiscard]] uint64_t last_updated() const;
+        [[nodiscard]] bool is_ready_to_mine() const { return m_readyToMine.load(); }
+        void set_ready_to_mine(bool ready) { m_readyToMine.store(ready); }
 	[[nodiscard]] bool is_default() const;
 	[[nodiscard]] bool is_mini() const;
 	[[nodiscard]] bool is_nano() const;
@@ -140,6 +142,9 @@ private:
 	mutable uint64_t m_adoptedGenesisTimestamp{ 0 };
 	mutable uint64_t m_adoptedGenesisHeight{ 0 };
         mutable uint64_t m_adoptedGenesisTime{ 0 };
+
+      	// Sync state - prevents mining/bans during startup
+	std::atomic<bool> m_readyToMine{ false };
 
 	std::map<uint64_t, std::vector<PoolBlock*>> m_blocksByHeight;
 	unordered_map<hash, PoolBlock*> m_blocksById;

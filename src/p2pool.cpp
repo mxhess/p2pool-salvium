@@ -1417,6 +1417,17 @@ void p2pool::download_block_headers4(uint64_t start_height, uint64_t current_hei
 				update_median_timestamp();
 				if (m_serversStarted.exchange(1) == 0) {
 					m_p2pServer = new P2PServer(this);
+                                        
+                                        // Display loading banner
+                                        LOGINFO(0, log::LightCyan() << "########################################################");
+                                        LOGINFO(0, log::LightCyan() << "LOADING SIDECHAIN - MINING MAY NOT OCCUR UNTIL COMPLETE");
+                                        LOGINFO(0, log::LightCyan() << "########################################################");
+                                        
+                                        // Wait for sidechain to be ready before starting stratum/mining
+                                        while (!m_sideChain->is_ready_to_mine()) {
+                                                std::this_thread::sleep_for(std::chrono::seconds(5));
+                                        }
+                                        
 					m_stratumServer = new StratumServer(this);
 #if defined(WITH_RANDOMX) && !defined(P2POOL_UNIT_TESTS)
 					if (m_params->m_minerThreads) {
