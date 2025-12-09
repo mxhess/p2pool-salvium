@@ -1576,8 +1576,14 @@ uint32_t BlockTemplate::get_hashing_blob_nolock(uint32_t extra_nonce, uint8_t* b
         hash miner_tx_hash = calc_miner_tx_hash(extra_nonce);
         const size_t num_hashes = m_transactionHashes.size() / HASH_SIZE;
         
+        if (num_hashes == 0) {
+                LOGERR(3, "get_hashing_blob_nolock: m_transactionHashes is empty");
+                return 0;
+        }
+        
         std::vector<hash> hashes(num_hashes);
         hashes[0] = miner_tx_hash;  // miner tx with current extra_nonce
+
         for (size_t i = 1; i < num_hashes; ++i) {
                 memcpy(hashes[i].h, m_transactionHashes.data() + i * HASH_SIZE, HASH_SIZE);
         }
