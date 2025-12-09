@@ -385,7 +385,7 @@ void BlockTemplate::update(const MinerData& data, const Mempool& mempool, const 
 
         // DEBUG: Show share/reward assignment
         for (size_t i = 0; i < m_shares.size(); ++i) {
-            LOGINFO(1, "BlockTemplate share[" << i << "]: spend_key=" << m_shares[i].m_wallet->spend_public_key() << " weight=" << m_shares[i].m_weight << " reward=" << m_rewards[i]);
+            LOGINFO(3, "BlockTemplate share[" << i << "]: spend_key=" << m_shares[i].m_wallet->spend_public_key() << " weight=" << m_shares[i].m_weight << " reward=" << m_rewards[i]);
         }
 
 	auto get_reward_amounts_weight = [this]() {
